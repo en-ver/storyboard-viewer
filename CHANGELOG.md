@@ -6,6 +6,15 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Build-once Docker image and runtime-only Compose examples for separate localhost viewers,
+  with nonroot permissions, private configuration, and opt-in Docker runtime tests.
+- Documented stale browser refresh after newly host-created folders on macOS with OrbStack
+  2.2.3, including the workaround to precreate folders or restart only the affected service.
+  The runtime subfolder check still fails. Docker Desktop and native Linux refresh remain
+  unverified, and no polling fallback is included.
+
 ## [0.5.3] — 2026-10-11
 
 ### Fixed
