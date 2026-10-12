@@ -96,7 +96,41 @@ test(
       assert.throws(() => fs.accessSync(path, fs.constants.W_OK), path);
       if (entry.isDirectory()) walk(path);
     }} walk('/app');
-    for (const path of ['/app/dist/cli.js', '/app/LICENSE', '/app/licenses/@fontsource/montserrat/LICENSE', '/app/web/index.html', '/app/web/sw.js']) assert(fs.statSync(path).isFile(), path);
+    for (const path of ['/app/dist/cli.js', '/app/LICENSE', '/app/licenses/@fontsource/montserrat/5.3.0/LICENSE', '/app/licenses/konva/10.7.1/LICENSE', '/app/licenses/mediabunny/1.61.3/LICENSE', '/app/web/index.html', '/app/web/sw.js']) assert(fs.statSync(path).isFile(), path);
+    const crypto = require('node:crypto');
+    const inventory = JSON.parse(fs.readFileSync('/app/licenses/packages.json', 'utf8'));
+    assert.equal(inventory.length, 29);
+    for (const name of ['konva', 'mediabunny', 'hls.js', 'svelte', '@cfworker/json-schema', '@codemirror/language', '@lezer/common', 'workbox-core', 'workbox-precaching', 'workbox-routing', 'workbox-strategies', 'workbox-window', 'url-toolkit', 'eventemitter3', '@svta/cml-id3', '@svta/cml-utils']) assert(inventory.some(pkg => pkg.name === name), name);
+    for (const pkg of inventory) {
+      const root = '/app/licenses/' + pkg.name + '/' + pkg.version;
+      for (const [file, digest] of Object.entries(pkg.notices)) {
+        const bytes = fs.readFileSync(root + '/' + file);
+        assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), digest);
+        assert.deepEqual(fs.readFileSync('/app/web/licenses/' + pkg.name + '/' + pkg.version + '/' + file), bytes);
+      }
+      for (const [file, digest] of Object.entries(pkg.source || {})) {
+        const bytes = fs.readFileSync(root + '/src/' + file);
+        assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), digest);
+        assert.deepEqual(fs.readFileSync('/app/web/licenses/' + pkg.name + '/' + pkg.version + '/src/' + file), bytes);
+      }
+    }
+    assert.equal(Object.keys(inventory.find(pkg => pkg.name === 'mediabunny').source).length, 67);
+    assert.match(fs.readFileSync('/app/licenses/konva/10.7.1/LICENSE', 'utf8'), /Eric Rowell/);
+    assert.match(fs.readFileSync('/app/licenses/konva/10.7.1/LICENSE', 'utf8'), /Anton Lavrenov/);
+    assert.match(fs.readFileSync('/app/licenses/@cfworker/json-schema/4.1.1/LICENSE.md', 'utf8'), /2020 Jeremy Danyow/);
+    assert.match(fs.readFileSync('/app/licenses/hls.js/1.7.3/LICENSE', 'utf8'), /Brightcove/);
+    assert.match(fs.readFileSync('/app/licenses/url-toolkit/2.2.5/LICENSE', 'utf8'), /2016 Tom Jenkinson/);
+    assert.match(fs.readFileSync('/app/licenses/eventemitter3/5.0.4/LICENSE', 'utf8'), /2014 Arnout Kazemier/);
+    assert.match(fs.readFileSync('/app/licenses/@svta/cml-id3/1.0.6/NOTICE.md', 'utf8'), /2023/);
+    assert.equal(inventory.filter(pkg => pkg.prebundledIn === 'hls.js@1.7.3').length, 4);
+    assert.match(fs.readFileSync('/app/licenses/hls.js/1.7.3/Apache-2.0.txt', 'utf8'), /END OF TERMS AND CONDITIONS/);
+    assert.match(fs.readFileSync('/app/licenses/THIRD-PARTY-NOTICES.txt', 'utf8'), /Source availability: mediabunny/);
+    assert.match(fs.readFileSync('/app/web/index.html', 'utf8'), /rel="license"/);
+    function noMaps(dir) { for (const entry of fs.readdirSync(dir, {withFileTypes:true})) {
+      const path = dir + '/' + entry.name;
+      if (entry.isDirectory()) noMaps(path);
+      else assert(!entry.name.endsWith('.map'), path);
+    }} noMaps('/app/web');
     require('playwright-core');
     Promise.all([import('@storyboard-viewer/format'), import('@storyboard-viewer/format/node')]).then(() => console.log('Nonroot, read-only package and runtime imports verified'));
   `;

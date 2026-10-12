@@ -16,14 +16,15 @@ COPY packages/ ./packages/
 COPY apps/web/ ./apps/web/
 COPY scripts/check-image-package.mjs ./scripts/check-image-package.mjs
 RUN sha256sum pnpm-lock.yaml > /tmp/source-lock.sha256 \
-    && pnpm install --frozen-lockfile
+    && pnpm install --frozen-lockfile \
+    && node scripts/check-image-package.mjs --browser-notices /src
 # Frozen installs do not populate the registry metadata that pnpm 8 deploy needs
 # for injected workspace packages (including its resolution of web dev dependencies).
 # Warm that cache in a disposable directory; verify the actual production graph below.
 RUN pnpm --filter @storyboard-viewer/cli... list --depth 0 --json > /tmp/workspace-deps.json \
     && node scripts/check-image-package.mjs --metadata /tmp/metadata /tmp/workspace-deps.json \
     && pnpm --dir /tmp/metadata install --lockfile-only --ignore-scripts
-RUN pnpm build \
+RUN SBD_IMAGE_LICENSES=1 pnpm build \
     && pnpm --filter @storyboard-viewer/cli list --prod --depth Infinity --json > /tmp/source-deps.json \
     && pnpm --filter @storyboard-viewer/cli --prod --offline deploy /out/cli \
     && sha256sum --check /tmp/source-lock.sha256 \

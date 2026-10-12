@@ -7,6 +7,9 @@ import pkg from './package.json' with { type: 'json' };
 export default defineConfig({
   // SBD_APP_VERSION: only for the e2e update test, which builds a second copy as "version B".
   define: { __APP_VERSION__: JSON.stringify(process.env['SBD_APP_VERSION'] ?? pkg.version) },
+  // Image packaging reads actual bundled modules (including Workbox) from these
+  // build-only maps, then removes the maps from the runtime web directory.
+  build: { sourcemap: process.env['SBD_IMAGE_LICENSES'] === '1' ? 'hidden' : false },
   // Resolve workspace packages to their TypeScript sources (see the "source" export condition).
   resolve: { conditions: ['source', ...defaultClientConditions] },
   plugins: [

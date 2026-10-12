@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -168,6 +170,356 @@ export function checkLinks(root, allowedPackages) {
   visit(root);
 }
 
+// This npm release omits its upstream license. Registry gitHead identifies
+// the exact source revision; retain verified upstream bytes, never infer authors.
+const upstreamBrowserNotices = {
+  '@cfworker/json-schema@4.1.1': {
+    url: 'https://raw.githubusercontent.com/cfworker/cfworker/5409fdc2bd144f68e8b28c61c71fcb16600000a6/LICENSE.md',
+    sha256: '376944252ab78ca6b41aee44ddea8894927ee67891e77e61eb9d59af63e35094',
+  },
+};
+
+// hls.js/light ships a prebuilt bundle. Its own map names the first three
+// modules; cml-id3's peer and the emitted utility functions identify cml-utils.
+// These exact versions come from hls.js 1.7.3's published build manifest.
+const hlsBundledNotices = {
+  'url-toolkit': {
+    version: '2.2.5',
+    files: {
+      LICENSE: {
+        url: 'https://raw.githubusercontent.com/tjenkinson/url-toolkit/d02ff136835786a00c55c0e69e38dd7cc26d5acc/LICENSE',
+        sha256: '0fa4bd51fab4d066970c481917d77f222253ee82344caf07efd03801aa558dff',
+      },
+    },
+  },
+  eventemitter3: {
+    version: '5.0.4',
+    files: {
+      LICENSE: {
+        url: 'https://raw.githubusercontent.com/primus/eventemitter3/b0144e940ace8add8f335a8adfbed9284eb419f3/LICENSE',
+        sha256: '3aecc12b1cb28832b5f65ab64291de96568c3f236a74d646281b4491f7bcadbf',
+      },
+    },
+  },
+  '@svta/cml-id3': {
+    version: '1.0.6',
+    files: {
+      LICENSE: {
+        url: 'https://raw.githubusercontent.com/streaming-video-technology-alliance/common-media-library/244ecf05132ae1d1dc9cbd01479fd88f7695dbce/libs/id3/LICENSE',
+        sha256: '95cdf13a152329c8a60cf739d442f578a172727f0584bff42406126719312f62',
+      },
+      'NOTICE.md': {
+        url: 'https://raw.githubusercontent.com/streaming-video-technology-alliance/common-media-library/244ecf05132ae1d1dc9cbd01479fd88f7695dbce/libs/id3/NOTICE.md',
+        sha256: '358b37b8ed1d8c6a40d22b3deb41c59f4532ca8e05eb6647ad2d1614f11ee90b',
+      },
+    },
+  },
+  '@svta/cml-utils': {
+    version: '1.5.0',
+    files: {
+      LICENSE: {
+        url: 'https://raw.githubusercontent.com/streaming-video-technology-alliance/common-media-library/244ecf05132ae1d1dc9cbd01479fd88f7695dbce/libs/utils/LICENSE',
+        sha256: '95cdf13a152329c8a60cf739d442f578a172727f0584bff42406126719312f62',
+      },
+    },
+  },
+};
+
+async function downloadNotice(upstream, path) {
+  const response = await fetch(upstream.url, { signal: AbortSignal.timeout(30_000) });
+  assert(response.ok, `Cannot retrieve browser notice: ${response.status}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  assert.equal(
+    createHash('sha256').update(bytes).digest('hex'),
+    upstream.sha256,
+    `Upstream browser notice changed: ${upstream.url}`,
+  );
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, bytes);
+}
+
+export async function prepareBrowserNotices(source) {
+  const root = findDependency(join(source, 'packages/format'), '@cfworker/json-schema');
+  assert(root, 'Missing installed @cfworker/json-schema');
+  const pkg = json(join(root, 'package.json'));
+  const id = `${pkg.name}@${pkg.version}`;
+  const upstream = upstreamBrowserNotices[id];
+  assert(upstream, `Unreviewed upstream browser notice: ${id}`);
+  await downloadNotice(upstream, join(source, 'node_modules/.image-notices', id, 'LICENSE.md'));
+  const hlsRoot = findDependency(join(source, 'apps/web'), 'hls.js');
+  const hls = json(join(hlsRoot, 'package.json'));
+  assert.equal(hls.version, '1.7.3', 'Unreviewed hls.js prebuilt bundle');
+  const nested = json(join(hlsRoot, 'dist/hls.light.mjs.map')).sources.filter((path) =>
+    path.startsWith('node_modules/'),
+  );
+  assert.deepEqual(
+    nested,
+    [
+      'node_modules/url-toolkit/src/url-toolkit.js',
+      'node_modules/@svta/cml-id3/dist/index.js',
+      'node_modules/eventemitter3/index.js',
+    ],
+    'Unreviewed hls.js bundled modules',
+  );
+  for (const [name, notice] of Object.entries(hlsBundledNotices)) {
+    assert.equal(hls.devDependencies[name], notice.version, `Changed prebundled version: ${name}`);
+    const response = await fetch(`https://registry.npmjs.org/${name}/${notice.version}`, {
+      signal: AbortSignal.timeout(30_000),
+    });
+    assert(response.ok, `Cannot read prebundled package metadata: ${name}`);
+    const metadata = await response.json();
+    assert.equal(metadata.name, name);
+    assert.equal(metadata.version, notice.version);
+    const dest = join(
+      source,
+      'node_modules/.image-notices/prebundled',
+      `${name}@${notice.version}`,
+    );
+    for (const [file, origin] of Object.entries(notice.files))
+      await downloadNotice(origin, join(dest, file));
+    // This is notice metadata only. Do not install or execute bundled packages.
+    writeFileSync(
+      join(dest, 'package.json'),
+      JSON.stringify(
+        {
+          name,
+          version: metadata.version,
+          license: metadata.license,
+          repository: metadata.repository,
+          prebundledIn: 'hls.js@1.7.3',
+          noticeSources: notice.files,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+  }
+}
+
+// Maps are produced only for image builds. They cover lazy chunks and the
+// separately bundled Workbox service worker, not just manifest dependencies.
+export function browserPackages(source) {
+  const web = join(source, 'apps/web/dist');
+  const output = files(web);
+  const publicFiles = files(join(source, 'apps/web/public'));
+  const roots = new Set();
+  for (const file of Object.keys(output).filter((path) => path.endsWith('.js'))) {
+    if (publicFiles[file]) continue;
+    const mapPath = join(web, `${file}.map`);
+    assert(existsSync(mapPath), `Missing browser module map: ${file}`);
+    const map = json(mapPath);
+    assert(Array.isArray(map.sources) && map.sources.length, `Empty browser module map: ${file}`);
+    for (const module of map.sources) {
+      const offset = module.indexOf('node_modules/');
+      if (offset < 0) continue;
+      let path = resolve(dirname(mapPath), map.sourceRoot ?? '', module);
+      // Workbox's maps use paths relative to its intermediate build, rather
+      // than the final map. Resolve the exact installed pnpm path in that case.
+      if (!existsSync(path)) path = resolve(source, module.slice(offset));
+      assert(existsSync(path), `Missing bundled module source: ${module}`);
+      path = realpathSync(path);
+      assert(inside(realpathSync(source), path), `External bundled module: ${module}`);
+      // Ignore nested package.json files that only specify type: module.
+      for (let root = dirname(path); ; root = dirname(root)) {
+        const manifest = join(root, 'package.json');
+        if (existsSync(manifest) && json(manifest).name) {
+          if (!inside(realpathSync(join(source, 'packages')), root)) roots.add(root);
+          break;
+        }
+        assert(dirname(root) !== root, `Missing bundled package manifest: ${module}`);
+      }
+    }
+  }
+  const prebundled = [];
+  for (const root of roots) {
+    const pkg = json(join(root, 'package.json'));
+    if (pkg.name === 'hls.js' && pkg.version === '1.7.3') {
+      for (const [name, notice] of Object.entries(hlsBundledNotices)) {
+        prebundled.push(
+          join(source, 'node_modules/.image-notices/prebundled', `${name}@${notice.version}`),
+        );
+      }
+    }
+  }
+  for (const root of prebundled) roots.add(root);
+  // Font binary assets do not appear in JavaScript maps.
+  const require = createRequire(join(source, 'apps/web/package.json'));
+  for (const name of Object.keys(json(join(source, 'apps/web/package.json')).dependencies)) {
+    if (name.startsWith('@fontsource/'))
+      roots.add(dirname(require.resolve(`${name}/package.json`)));
+  }
+  assert(roots.size, 'Missing browser dependency inventory');
+  return [...roots].toSorted();
+}
+
+export function copyBrowserNotices(source, deployed, roots = browserPackages(source)) {
+  const licenses = join(deployed, 'licenses');
+  const originalWeb = files(join(deployed, 'web'));
+  const publicFiles = files(join(source, 'apps/web/public'));
+  const generatedMaps = new Set(
+    Object.keys(originalWeb).filter((path) => path.endsWith('.js.map') && !publicFiles[path]),
+  );
+  const inventory = [];
+  const notices = [
+    'Browser third-party notices',
+    'Package names, versions and license identifiers come from the installed packages.',
+    'The original notices below apply to those packages, not to the entire application.',
+    'This directory is also served at ./licenses/ by the image web application.',
+    'File index: ./licenses/packages.json lists each package and its notice and source file paths.',
+  ];
+  const seen = new Set();
+  for (const root of roots) {
+    const pkg = json(join(root, 'package.json'));
+    assert(/^(@[\w.-]+\/)?[\w.-]+$/.test(pkg.name), 'Invalid bundled package name');
+    assert(/^[\w.+-]+$/.test(pkg.version), `Invalid bundled package version: ${pkg.name}`);
+    const id = `${pkg.name}@${pkg.version}`;
+    assert(!seen.has(id), `Duplicate bundled package: ${id}`);
+    seen.add(id);
+    assert(
+      ['MIT', 'Apache-2.0', 'MPL-2.0', 'OFL-1.1'].includes(pkg.license),
+      `Unreviewed browser license: ${id} (${pkg.license})`,
+    );
+    const dest = join(licenses, pkg.name, pkg.version);
+    mkdirSync(dest, { recursive: true });
+    const originals = {};
+    function copyNotices(dir) {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules') continue;
+        const path = join(dir, entry.name);
+        assert(!entry.isSymbolicLink(), `Unexpected notice source link: ${path}`);
+        if (entry.isDirectory()) copyNotices(path);
+        else if (/^(licen[cs]e|copying|notice|copyright|ofl)([.-]|$)/i.test(entry.name)) {
+          assert(readFileSync(path).length, `Empty browser notice: ${path}`);
+          const rel = relative(root, path);
+          mkdirSync(dirname(join(dest, rel)), { recursive: true });
+          copyFileSync(path, join(dest, rel));
+          originals[rel] = hash(path);
+        }
+      }
+    }
+    copyNotices(root);
+    if (pkg.prebundledIn) {
+      assert.equal(pkg.prebundledIn, 'hls.js@1.7.3');
+      const notice = hlsBundledNotices[pkg.name];
+      assert.equal(pkg.version, notice?.version, `Unreviewed prebundled notice: ${id}`);
+      for (const [file, origin] of Object.entries(notice.files))
+        assert.equal(originals[file], origin.sha256, `Unverified prebundled notice: ${id}/${file}`);
+    }
+    const upstream = upstreamBrowserNotices[id];
+    if (upstream) {
+      const path = join(source, 'node_modules/.image-notices', id, 'LICENSE.md');
+      assert.equal(hash(path), upstream.sha256, `Unverified upstream browser notice: ${id}`);
+      copyFileSync(path, join(dest, 'LICENSE.md'));
+      originals['LICENSE.md'] = hash(path);
+      notices.push(`Original notice source: ${upstream.url}`);
+    }
+    assert(
+      Object.keys(originals).some((file) => /^(licen[cs]e|copying|ofl)/i.test(file)),
+      `Missing browser license: ${id}`,
+    );
+    copyFileSync(join(root, 'package.json'), join(dest, 'package.json'));
+    const entry = {
+      name: pkg.name,
+      version: pkg.version,
+      license: pkg.license,
+      notices: originals,
+    };
+    if (pkg.prebundledIn) entry.prebundledIn = pkg.prebundledIn;
+    notices.push(`\n${id} (${pkg.license})`);
+    if (pkg.prebundledIn)
+      notices.push(
+        `Included in the prebuilt ${pkg.prebundledIn} browser bundle. Original notice sources: ${JSON.stringify(pkg.noticeSources)}`,
+      );
+    for (const file of Object.keys(originals).toSorted()) {
+      notices.push(
+        `--- ${pkg.name}/${pkg.version}/${file} ---`,
+        readFileSync(join(dest, file), 'utf8'),
+      );
+    }
+    if (pkg.license === 'Apache-2.0') {
+      // hls.js ships its attribution and an Apache URL, not the complete terms.
+      // TypeScript's frozen installed package includes the standard full text.
+      const apache = join(source, 'node_modules/typescript/LICENSE.txt');
+      const text = readFileSync(apache, 'utf8');
+      assert(
+        text.includes('Grant of Patent License') && text.includes('END OF TERMS AND CONDITIONS'),
+        'Incomplete Apache license text',
+      );
+      copyFileSync(apache, join(dest, 'Apache-2.0.txt'));
+      notices.push('--- Apache-2.0 terms (from installed TypeScript LICENSE.txt) ---', text);
+    }
+    if (pkg.license === 'MPL-2.0') {
+      // Mediabunny publishes its preferred TypeScript source in the npm package.
+      // Ship it byte-for-byte, with its original file headers and package README.
+      entry.source = files(join(root, 'src'));
+      cpSync(join(root, 'src'), join(dest, 'src'), { recursive: true });
+      assert.deepEqual(files(join(dest, 'src')), entry.source, `Incomplete MPL source: ${id}`);
+      copyFileSync(join(root, 'README.md'), join(dest, 'README.md'));
+      notices.push(
+        `Source availability: ${pkg.name}/${pkg.version}/src/ contains the complete, unmodified Source Code Form from this installed package.`,
+        'This source is governed by MPL-2.0; see the LICENSE and original source headers in that directory.',
+        'Browser recipients can obtain these files without charge at ./licenses/ (relative to the application URL).',
+      );
+    }
+    inventory.push(entry);
+  }
+  writeFileSync(join(licenses, 'packages.json'), JSON.stringify(inventory, null, 2) + '\n');
+  writeFileSync(join(licenses, 'THIRD-PARTY-NOTICES.txt'), notices.join('\n') + '\n');
+  cpSync(licenses, join(deployed, 'web/licenses'), { recursive: true });
+  assert.deepEqual(
+    files(join(deployed, 'web/licenses')),
+    files(licenses),
+    'Browser notices copy is incomplete',
+  );
+  // Maps are build evidence, not runtime assets. Workbox emits map footer links;
+  // remove only that generated footer when removing its map.
+  for (const file of generatedMaps) {
+    const script = join(deployed, 'web', file.slice(0, -4));
+    const text = readFileSync(script, 'utf8');
+    writeFileSync(script, text.replace(/\n\/\/# sourceMappingURL=[^\n]+\s*$/, '\n'));
+    rmSync(join(deployed, 'web', file));
+  }
+  const index = join(deployed, 'web/index.html');
+  const html = readFileSync(index, 'utf8');
+  assert(html.includes('</head>'), 'Missing web document head');
+  writeFileSync(
+    index,
+    html.replace(
+      '</head>',
+      '<link rel="license" href="./licenses/THIRD-PARTY-NOTICES.txt">\n</head>',
+    ),
+  );
+  // Verify the final payload still contains every original runtime asset.
+  // Only build maps, their footer links and the license discovery link differ.
+  const finalWeb = files(join(deployed, 'web'));
+  for (const file of Object.keys(originalWeb)) {
+    if (generatedMaps.has(file)) {
+      assert(!finalWeb[file], `Build map in runtime: ${file}`);
+      continue;
+    }
+    let bytes = readFileSync(join(source, 'apps/web/dist', file));
+    if (file === 'index.html')
+      bytes = Buffer.from(
+        bytes
+          .toString('utf8')
+          .replace(
+            '</head>',
+            '<link rel="license" href="./licenses/THIRD-PARTY-NOTICES.txt">\n</head>',
+          ),
+      );
+    else if (generatedMaps.has(`${file}.map`))
+      bytes = Buffer.from(
+        bytes.toString('utf8').replace(/\n\/\/# sourceMappingURL=[^\n]+\s*$/, '\n'),
+      );
+    assert.equal(
+      finalWeb[file],
+      createHash('sha256').update(bytes).digest('hex'),
+      `Changed runtime web asset: ${file}`,
+    );
+  }
+  return inventory;
+}
+
 export function checkPackage(source, deployed, sourceReport) {
   const expected = dependencyGraph(sourceReport);
   assert.deepEqual(installedGraph(deployed), expected, 'Deployed production graph changed');
@@ -221,24 +573,18 @@ export function checkPackage(source, deployed, sourceReport) {
   assert.deepEqual(files(join(sourceCli, 'web')), web, 'CLI web copy is incomplete');
   assert.deepEqual(files(join(deployed, 'web')), web, 'Deployed web copy is incomplete');
 
-  // Keep application and bundled font licenses, as well as dependency package notices.
+  // pnpm retains CLI dependency notices. Browser-only modules need their own
+  // notices, including transitives, compiler runtime and service-worker modules.
   copyFileSync(join(source, 'LICENSE'), join(deployed, 'LICENSE'));
   copyFileSync(join(source, 'LICENSE'), join(format, 'LICENSE'));
-  const require = createRequire(join(source, 'apps/web/package.json'));
-  for (const name of Object.keys(json(join(source, 'apps/web/package.json')).dependencies)) {
-    if (!name.startsWith('@fontsource/')) continue;
-    const root = dirname(require.resolve(`${name}/package.json`));
-    const notices = readdirSync(root).filter((file) => /^(license|ofl)(\.|$)/i.test(file));
-    assert(notices.length, `Missing font license: ${name}`);
-    const dest = join(deployed, 'licenses', name);
-    mkdirSync(dest, { recursive: true });
-    for (const file of notices) copyFileSync(join(root, file), join(dest, file));
-  }
+  copyBrowserNotices(source, deployed);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [source, deployed, before] = process.argv.slice(2);
-  if (source === '--metadata') {
+  if (source === '--browser-notices') {
+    await prepareBrowserNotices(deployed);
+  } else if (source === '--metadata') {
     mkdirSync(deployed, { recursive: true });
     writeFileSync(join(deployed, 'package.json'), JSON.stringify(metadataManifest(json(before))));
   } else {
