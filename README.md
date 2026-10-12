@@ -141,65 +141,64 @@ image tool) into shots, arrange layers on the canvas and keep everything in orde
 
 ## Run with Docker
 
-Build one image from this checkout. Docker installs dependencies and compiles the app during
-the build, not when a container starts. The runtime contains no browser or ffmpeg executable.
-CLI PDF export needs an external browser setup and is not included in this deployment.
+Use the source checkout and branch you want to deploy. Run these commands from its root.
+Docker installs dependencies and builds the app once, not at container startup.
+The runtime has no browser or ffmpeg executable. CLI PDF export is not included.
 
 ```sh
-REPO="$(pwd)" # run from the source checkout
+REPO="$(pwd)"
 docker build --tag storyboard-viewer:local --file "$REPO/Dockerfile" "$REPO"
 cp "$REPO/compose.template.yaml" "$REPO/compose.yaml"
 ```
 
-Edit `compose.yaml` before startup. It is ignored by Git. For each service, set an existing
-unpacked `.sbd` folder, a different localhost port, and a separate configuration volume.
-The template paths are placeholders. Docker refuses missing source folders instead of creating
-them. For a trial, copy an existing example to a disposable folder and mount that copy.
-Do not edit the repository examples through the viewer.
+Edit the Git-ignored `compose.yaml` before startup. The template defines two services,
+`film-a` and `film-b`. Set each service's bind source to its own existing, absolute
+unpacked `.sbd` folder path. Use different localhost ports and keep separate named
+configuration volumes. Missing source folders cause an error instead of being created.
 
-Keep all three Compose files together. Start only `compose.yaml`. Each concrete service
-inherits runtime defaults through external `extends`. The base `viewer` is not a running
-service. Do not combine the base and local files with multiple `-f` arguments.
+For a trial, copy an example to a disposable folder. Do not mount repository examples for editing.
+Keep `compose.base.yaml` beside `compose.yaml`. Each service uses external `extends`
+to inherit runtime defaults. Start only `compose.yaml`. Do not combine it with the base
+using multiple `--file` arguments, which would start an extra `viewer` service.
+
+First, display the resolved configuration:
 
 ```sh
 docker compose --file "$REPO/compose.yaml" config
+```
+
+Make sure that the paths, ports, and volumes match your choices. Then start the viewers:
+
+```sh
 docker compose --file "$REPO/compose.yaml" up -d --no-build --pull never
 docker compose --file "$REPO/compose.yaml" ps
 ```
 
-With the unchanged template ports, open `http://localhost:4401/` and
-`http://localhost:4402/`. Make sure that resolved bind paths and localhost ports match your
-configuration before startup. The viewer has no sign-in. Keep these ports on `127.0.0.1`.
-Mount only the intended storyboard folder. Additional linked-media mounts must preserve the
-relative paths and normally be read-only. Never mount your home, Docker socket, or credentials.
+With the template ports, open `http://localhost:4401/` and `http://localhost:4402/`.
+The viewer has no sign-in. Keep ports bound to `127.0.0.1`.
+Mount only the intended storyboard folder. For linked media, preserve relative paths and use
+read-only mounts where possible. Never mount your home, Docker socket, or credentials.
 
-Containers share the image, not storyboards, configuration volumes, or temporary storage.
-Each configuration volume stores the recent list and viewer discovery state under `/config`.
-Container-local discovery URLs are not host viewer URLs. The image files are read-only.
-Browser saves write to the mounted host storyboard. Coordinate writers as with the native app.
+Containers share the image, not storyboards or configuration. Each named volume stores its
+service's recent list and viewer discovery state under `/config`.
+Browser saves write to the host storyboard. Coordinate writers as with the native app.
 
-### Permissions and lifecycle
+### Permissions and updates
 
-The default identity is UID/GID `1000:1000`. Docker initializes new configuration volumes
-from the image-owned directory. The storyboard must be writable by this identity.
-No startup command changes host permissions or ownership.
+The default user and group IDs are `1000:1000`. The storyboard must be writable by that identity.
+Docker initializes new configuration volumes from the image-owned directory.
+Startup does not change host permissions or ownership.
 
-On native Linux, an optional host identity uses `SBD_UID` and `SBD_GID`, both nonzero numeric
-IDs. A different identity also needs a writable configuration directory. In each concrete
-service, replace the volume at `/config` with a long-form bind to a separate, existing host
-directory writable by that identity. Set `bind.create_host_path: false` there too.
-The `/tmp` mount permits any nonroot identity. Do not use a root override or a blanket
-`chmod`/`chown` to work around errors. If permissions fail, stop and choose compatible
-storage and identity. macOS engine permission mapping differs from native Linux.
+On native Linux, optional `SBD_UID` and `SBD_GID` variables select different nonzero numeric IDs.
+That identity also needs writable configuration storage. For each service, replace the
+`/config` volume with a bind to its own existing, writable host directory.
+Set `bind.create_host_path: false` there too. Use the same variables for all Compose commands.
+Do not use root or blanket `chmod`/`chown` overrides to bypass permission errors.
+macOS engine permission mapping differs from native Linux.
 
-```sh
-SBD_UID="$(id -u)" SBD_GID="$(id -g)" docker compose --file "$REPO/compose.yaml" config
-# Start with the same variables only after inspecting the configuration and storage.
-```
-
-Startup, restart, and recreation use the locally built image without package or registry
-access. Remote linked media is outside this offline guarantee. Restart keeps the same image.
-To update, build from the intended checkout and recreate only after a successful build:
+Startup and restart need no package or registry downloads. Remote linked media is not covered
+by this offline behavior. Restart keeps the current image.
+To update, save browser work and pause editing. Build from the intended checkout, then recreate:
 
 ```sh
 docker build --tag storyboard-viewer:local --file "$REPO/Dockerfile" "$REPO" &&
@@ -210,65 +209,44 @@ Use `docker compose --file "$REPO/compose.yaml" stop` to stop these services.
 Use `down` to remove their containers and network. Do not add `--volumes` unless you intend
 to delete their configuration. Neither command deletes the host storyboard.
 
-An isolated MCP client can communicate through standard input/output with a running service:
+An MCP client can use standard input/output through a running service:
 
 ```sh
 docker compose --file "$REPO/compose.yaml" exec -T film-a node /app/dist/cli.js mcp /storyboard.sbd
 ```
 
-Do not add `--serve`: the service already runs the viewer. This is not a network MCP endpoint
-or automatic agent configuration. Keep protocol output separate from diagnostics on stderr.
+Do not add `--serve`: the service already runs the viewer.
+This command is not a network MCP endpoint or automatic agent configuration.
+Container discovery URLs are not host viewer URLs.
 
 ### Host folder changes and live refresh
 
-A bind mount exposes a host folder inside the container. Live refresh depends on filesystem
-events, the notifications that tell the viewer files changed. Visible files do not prove events arrived.
+A bind mount exposes a host folder inside the container.
+Live refresh needs filesystem events, notifications that tell the viewer files changed.
 
 On macOS with OrbStack 2.2.3, newly host-created subfolders were visible but produced no parent
-watch events. The open browser stayed stale after media replacements inside those folders.
-This occurred under both `/var/folders/...` and `$HOME`. Moving folders under `$HOME` did not fix it.
-The default watcher watches each directory separately. A native recursive watcher experiment
-also failed to provide a general fix. Watch registration for newly host-created directories
-remains uncertain, so arbitrary nested changes have no refresh guarantee.
+watch events. The browser stayed stale after media replacements inside those folders.
+This occurred under both temporary storage (`/var/folders/...`) and `$HOME`.
+Moving the folder under `$HOME` did not fix it.
 
-Edits and atomic replacements in already-watched directories generally passed.
-Browser saves and MCP operations also worked. However, refresh between separate MCP and viewer
+Edits and atomic replacements in already-watched directories generally worked.
+Browser saves and MCP operations also worked. Refresh between separate MCP and viewer
 processes still depends on filesystem events. This is a refresh limitation, not unsupported MCP.
-Container-created directories passed the observed checks, but that does not require moving or
-copying your canonical storyboard.
 
 Create needed subfolders before starting the viewer. If you add host subfolders after startup,
-save all browser work and pause editing before restarting only the affected service.
-For `film-a`, run this on the Docker host with `REPO` set as above:
+save all browser work and pause editing. Then restart only the affected service:
 
 ```sh
 docker compose --file "$REPO/compose.yaml" restart film-a
 ```
 
-This registers existing directories at startup. No image rebuild or restart of other viewers is
-needed. It does not fix event delivery for later host-created folders.
+Restart registers existing directories. No image rebuild or restart of other viewers is needed.
+It does not fix event delivery for later host-created folders.
+No polling fallback is included. Docker Desktop and native Linux refresh behavior remain unverified.
 
 See the [Node.js filesystem caveats](https://nodejs.org/docs/latest-v24.x/api/fs.html#caveats)
-and the [matching OrbStack 2.2.3 report](https://github.com/orbstack/orbstack/issues/2561#issuecomment-5403565713).
-The [OrbStack location report](https://github.com/orbstack/orbstack/issues/2714) does not establish a `$HOME` fix.
-Node.js warns about Docker and other virtualization, so this risk is not necessarily exclusive
-to OrbStack. Docker Desktop and native Linux refresh behavior remain unverified.
-No polling fallback is included in this Docker contribution.
-
-### Docker tests
-
-Ordinary `pnpm test` needs no Docker. After a direct image build, run the explicit runtime
-checks with `pnpm test:docker`. Set `SBD_IMAGE` to an existing image tag or ID to test it.
-The checks use disposable example copies under the OS temporary directory, isolated Compose
-resources, and available localhost ports. They test mounts, repeated replacements, media,
-nonroot permissions, private state, offline recreation, MCP edits, and graceful shutdown.
-They remove only their own containers and volumes and print the retained evidence directory.
-
-These checks do not prove browser refresh on every host engine. Use an already-open browser
-for save and refresh checks, and collect native Linux and Docker Desktop evidence separately.
-OrbStack evidence is not Docker Desktop evidence. The observed OrbStack 2.2.3 runtime suite
-passed six of seven substantive checks. The newly host-created subfolder check failed.
-Documenting this limitation does not make that suite pass or establish deployment acceptance.
+and the [OrbStack 2.2.3 report](https://github.com/orbstack/orbstack/issues/2561#issuecomment-5403565713).
+Node.js warns about Docker and other virtualization, so this risk is not necessarily exclusive to OrbStack.
 
 ## Example storyboards
 

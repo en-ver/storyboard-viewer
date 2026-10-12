@@ -1,0 +1,36 @@
+# Copy to compose.yaml. Replace BOTH source paths with existing unpacked .sbd folders.
+# Each service needs its own localhost port and configuration volume.
+services:
+  film-a:
+    extends:
+      file: compose.base.yaml
+      service: viewer
+    ports:
+      - '127.0.0.1:4401:4400'
+    volumes:
+      - type: bind
+        source: /absolute/path/to/film-a.sbd
+        target: /storyboard.sbd
+        bind:
+          create_host_path: false
+      - type: volume
+        source: film-a-config
+        target: /config
+  film-b:
+    extends:
+      file: compose.base.yaml
+      service: viewer
+    ports:
+      - '127.0.0.1:4402:4400'
+    volumes:
+      - type: bind
+        source: /absolute/path/to/film-b.sbd
+        target: /storyboard.sbd
+        bind:
+          create_host_path: false
+      - type: volume
+        source: film-b-config
+        target: /config
+volumes:
+  film-a-config:
+  film-b-config:
