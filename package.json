@@ -1,7 +1,7 @@
 {
   "name": "storyboard-viewer",
   "private": true,
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Storyboard Viewer: an offline-first storyboard app (.sbd) that AI agents edit through MCP while you watch.",
   "type": "module",
   "license": "MIT",

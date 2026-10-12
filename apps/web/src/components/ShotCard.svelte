@@ -272,6 +272,20 @@
     .body > .visual {
       order: 0;
     }
+    /* stacked vertical frames: about half a phone screen tall, so the shot's text stays near */
+    .body.portrait > .visual {
+      width: min(100%, calc(55vh * 9 / 16));
+      justify-self: center;
+    }
+  }
+  @media (max-width: 600px) {
+    .shot {
+      padding: var(--space-3);
+    }
+    /* touch screens have no hover: keep the shot's tools reachable (the drag grip needs a mouse) */
+    .hover-tools {
+      opacity: 1;
+    }
   }
   .text {
     display: flex;

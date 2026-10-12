@@ -448,7 +448,7 @@ export async function createMcpSession(opts: McpOptions = {}): Promise<McpSessio
           if (!busy || port >= first + 20 || first === 0) throw e;
         }
       }
-      log(`viewer: ${viewer.url}`);
+      log(`viewer: ${[viewer.url, ...viewer.networkUrls].join(' · ')}`);
     }
     return store;
   };
@@ -1598,12 +1598,17 @@ export async function createMcpSession(opts: McpOptions = {}): Promise<McpSessio
     {
       title: 'Viewer link',
       description:
-        'The localhost URL of the Storyboard Viewer showing this storyboard (open it in the in-app browser next to the chat). It refreshes automatically after every edit.',
+        'The localhost URL of the Storyboard Viewer showing this storyboard (open it in the in-app browser next to the chat). It refreshes automatically after every edit. When the viewer listens on the network (--host 0.0.0.0), network_urls are links that work from a phone on the same network or tailnet.',
       annotations: { readOnlyHint: true },
     },
     tool(async () => {
       const s = requireStore();
-      if (viewer) return text({ url: viewer.url });
+      if (viewer)
+        return text({
+          url: viewer.url,
+          // a phone or another computer opens one of these (the viewer listens on the network)
+          ...(viewer.networkUrls.length ? { network_urls: viewer.networkUrls } : {}),
+        });
       const found = await findViewer(s.path);
       if (found) return text({ url: found });
       return text({

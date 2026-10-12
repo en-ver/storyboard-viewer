@@ -950,4 +950,14 @@
       border-top: 1px solid var(--border);
     }
   }
+  /* phones: two cards a row */
+  @media (max-width: 600px) {
+    .library {
+      padding: var(--space-3);
+    }
+    .grid {
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: var(--space-3);
+    }
+  }
 </style>

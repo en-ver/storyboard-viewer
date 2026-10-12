@@ -22,7 +22,7 @@
  */
 import { createReadStream, createWriteStream, existsSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { pipeline } from 'node:stream/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -72,6 +72,8 @@ export interface ServeOptions {
 
 export interface RunningServer {
   url: string;
+  /** With `--host 0.0.0.0` (or `::`): the same viewer at this computer's network addresses. */
+  networkUrls: string[];
   port: number;
   server: Server;
   close(): Promise<void>;
@@ -672,6 +674,7 @@ export async function startServer(
   const shownHost =
     host === '127.0.0.1' || host === '0.0.0.0' || host === '::' ? 'localhost' : host;
   const url = `http://${shownHost}:${port}/`;
+  const networkUrls = host === '0.0.0.0' || host === '::' ? lanUrls(port) : [];
   selfUrl = url;
   const unregister = opts.register === false ? () => {} : registerViewer(store.path, url);
   if (opts.recent) {
@@ -688,6 +691,7 @@ export async function startServer(
   }
   return {
     url,
+    networkUrls,
     port,
     server,
     close: async () => {
@@ -704,4 +708,12 @@ export async function startServer(
       await closed;
     },
   };
+}
+
+/** IPv4 addresses of this computer's network interfaces (Wi-Fi, Tailscale…), as viewer links. */
+function lanUrls(port: number): string[] {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((a) => a && a.family === 'IPv4' && !a.internal)
+    .map((a) => `http://${a!.address}:${port}/`);
 }

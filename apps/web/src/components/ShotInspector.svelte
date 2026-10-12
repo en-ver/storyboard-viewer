@@ -5,6 +5,7 @@
   import { tooltip } from '../lib/tooltip';
   import {
     addVariant,
+    aspectValue,
     moveVariant,
     removeVariant,
     setActiveVariant,
@@ -135,7 +136,11 @@
     </label>
   </div>
 
-  <section class="variants" aria-label="Pictures">
+  <section
+    class="variants"
+    aria-label="Pictures"
+    style:--frame-ratio={aspectValue(app.project?.manifest.aspect_ratio)}
+  >
     <VariantCarousel {shot} label="Shot {entry.index + 1}" strip={ui.shotMore} />
     {#if shown}
       <div class="v-tools" data-variant-id={shown.id}>
@@ -362,6 +367,22 @@
       width: min(360px, 92vw);
       z-index: 20;
       box-shadow: -8px 0 24px var(--shadow-color);
+    }
+  }
+  /* phones: a full-screen sheet over the app (the × in its header closes it) */
+  @media (max-width: 600px) {
+    .inspector {
+      inset: 0;
+      width: 100%;
+      z-index: 30;
+      border-left: 0;
+      box-shadow: none;
+      padding: var(--space-3) var(--space-3) max(var(--space-5), env(safe-area-inset-bottom));
+    }
+    /* a vertical picture at full width would fill the screen: about half of it instead */
+    .variants > :global(.carousel) {
+      width: min(100%, calc(50vh * var(--frame-ratio, 1.7778)));
+      align-self: center;
     }
   }
 </style>

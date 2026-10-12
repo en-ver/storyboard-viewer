@@ -371,4 +371,45 @@
       display: none;
     }
   }
+  /* phones: menus on the first row, the view tabs on a full-width second row; the title gives
+     way to the menus and the source label is dropped (its location is still on the title) */
+  @media (max-width: 600px) {
+    .top {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: 'brand right' 'tabs tabs';
+      column-gap: var(--space-2);
+      row-gap: 0;
+      padding: 0 var(--space-3);
+      min-height: 0;
+    }
+    .brand {
+      grid-area: brand;
+      min-height: 44px;
+    }
+    .brand :global(.menubar) {
+      margin-left: 0;
+    }
+    .source {
+      display: none;
+    }
+    .tabs {
+      grid-area: tabs;
+      margin: 0 calc(-1 * var(--space-3));
+      padding: 0 var(--space-1);
+      border-top: 1px solid var(--border);
+    }
+    [role='tab'] {
+      flex: 1;
+      min-height: 40px;
+      padding: 4px 6px 2px;
+    }
+    /* only the live "Updated" note: issues and saving stay in the menus */
+    .right {
+      display: flex;
+      grid-area: right;
+    }
+    .right > :global(:not(.updated)) {
+      display: none;
+    }
+  }
 </style>

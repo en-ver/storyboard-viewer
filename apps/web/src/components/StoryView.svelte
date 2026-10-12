@@ -333,4 +333,15 @@
       grid-template-columns: 1fr;
     }
   }
+  @media (max-width: 600px) {
+    .story-top {
+      padding: var(--space-3) var(--space-3) 0;
+    }
+    .script-wrap {
+      padding: 0 var(--space-3) var(--space-5);
+    }
+    .story {
+      padding: var(--space-3) var(--space-3) 96px;
+    }
+  }
 </style>

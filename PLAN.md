@@ -685,6 +685,27 @@ pnpm fixture:storyboarder  # regenerate the Storyboarder test fixture (ffmpeg fo
   shared edges showed as faint lines at fractional zooms. `canvas.webp` was refreshed (new zone
   colors and labels).
 
+### 0.5.3 — phones (2026-10-11)
+
+- **One phone breakpoint, 600 px**, next to the existing 720–1000 px ones; desktop layout is
+  untouched. Header: a two-row grid (`brand right` / `tabs tabs`), the source label hidden, only
+  the "Updated" note kept on the right. `MenuBar` pops are `position: fixed` 8 px from both
+  edges with taller rows. `PlayerBar`: toggle labels in `.lbl` (hidden), compact time, safe-area
+  padding; the bar was the element that widened the page to ~552 px. Script editor: 14 px line
+  padding, smaller screenplay indents (must come after the base CodeMirror rules in the file).
+  `ShotCard` portrait visuals and the inspector's carousel are capped by height (`55vh` / `50vh`
+  × frame ratio, `--frame-ratio` from `aspectValue`); the inspector is a full-screen sheet;
+  the card's ⋯ menu is always visible (no hover on touch). `#app` is `100dvh` on screen.
+  `viewport-fit=cover` for the safe-area insets.
+- **Default Story layout** is Board when `(max-width: 600px)` matches and no `story-view`
+  preference is stored.
+- **Network links.** `startServer` returns `networkUrls` (non-internal IPv4 addresses) when the
+  host is `0.0.0.0` or `::`; `get_viewer_url` adds them as `network_urls`, `sbd serve` prints
+  them, `sbd mcp` already accepted `--host` (now in its usage line). The write API still has
+  only the custom-header and same-origin checks, so this is for trusted networks.
+- Checked at 375 × 812 in Chromium (Story Script/Board, Shot details, Canvas, Assets, menus,
+  animatic) against a live `sbd serve`; not on a real iPhone/Safari.
+
 ### 0.5.2 — fix release: updates reach open tabs (2026-10-07)
 
 - **Root cause of the stuck old version.** `registerType: 'autoUpdate'` together with
@@ -727,4 +748,4 @@ pnpm fixture:storyboarder  # regenerate the Storyboarder test fixture (ffmpeg fo
 
 ## Status
 
-All milestones (M0–M4), the 0.2.0, 0.3.0 and 0.4.0 feedback rounds, the 0.4.1 fix release, 0.5.0 (canvas layouts, captions, tours, save in place) and the 0.5.1 and 0.5.2 fix releases are complete. Being published: GitHub `swaymun/storyboard-viewer` and a hosted copy of the web app on Cloudflare Workers (`pnpm deploy:web`); no npm package. Known gaps: Safari/Firefox untested; Storyboarder multi-board shots not merged and Shot Generator data dropped; animatic export draws canvas-variant video layers as their first frame; no CLI animatic export; PDF grid cells clip very long text; `sbd export-pdf` output is large for image-heavy storyboards; Kokoro voices were not listened to by a person (timings were checked, quality was not); Script view: shot cards are hidden below 860 px width, the editor was only exercised in Chromium; reopening a folder from the recent list was not tested end to end (headless Chromium cannot read stored handles back).
+All milestones (M0–M4), the 0.2.0, 0.3.0 and 0.4.0 feedback rounds, the 0.4.1 fix release, 0.5.0 (canvas layouts, captions, tours, save in place) and the 0.5.1, 0.5.2 and 0.5.3 fix releases are complete. Being published: GitHub `swaymun/storyboard-viewer` and a hosted copy of the web app on Cloudflare Workers (`pnpm deploy:web`); no npm package. Known gaps: Safari/Firefox untested; Storyboarder multi-board shots not merged and Shot Generator data dropped; animatic export draws canvas-variant video layers as their first frame; no CLI animatic export; PDF grid cells clip very long text; `sbd export-pdf` output is large for image-heavy storyboards; Kokoro voices were not listened to by a person (timings were checked, quality was not); Script view: shot cards are hidden below 860 px width; phone layout (0.5.3) checked only in Chromium emulation, the editor was only exercised in Chromium; reopening a folder from the recent list was not tested end to end (headless Chromium cannot read stored handles back).

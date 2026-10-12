@@ -107,6 +107,12 @@ input[type='range']:focus-visible {
 #app {
   height: 100%;
 }
+/* phones: the visible height, so the player bar is not hidden under the browser's toolbar */
+@media screen {
+  #app {
+    height: 100dvh;
+  }
+}
 
 :focus-visible {
   outline: 2px solid var(--focus);

@@ -62,7 +62,7 @@
     >
   </div>
   <span class="time mono" aria-hidden="true"
-    >{formatTime(player.time)} / {formatTime(duration)}</span
+    >{formatTime(player.time)}<span class="dur"> / {formatTime(duration)}</span></span
   >
   <input
     class="scrub"
@@ -86,6 +86,7 @@
     class="btn ghost"
     id="soundtrack-toggle"
     data-tour="soundtrack-toggle"
+    aria-label="Soundtrack"
     aria-pressed={ui.soundtrackOpen}
     aria-controls="soundtrack"
     {@attach tooltip(
@@ -95,7 +96,7 @@
     )}
     onclick={() => (ui.soundtrackOpen = !ui.soundtrackOpen)}
   >
-    <Icon name="volume" /> Soundtrack
+    <Icon name="volume" /><span class="lbl">Soundtrack</span>
   </button>
   <button
     type="button"
@@ -107,7 +108,7 @@
     aria-controls="animatic"
     onclick={() => (player.stageOpen = !player.stageOpen)}
   >
-    <Icon name="expand" /> Animatic
+    <Icon name="expand" /><span class="lbl">Animatic</span>
   </button>
 </footer>
 
@@ -183,6 +184,38 @@
   }
   @media (max-width: 900px) {
     .now {
+      display: none;
+    }
+  }
+  /* phones: icon-only toggles and a compact time, so the bar fits 320px */
+  @media (max-width: 600px) {
+    .bar {
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-3);
+      padding-bottom: max(var(--space-2), env(safe-area-inset-bottom));
+    }
+    .time {
+      flex: none;
+      min-width: 0;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .scrub {
+      min-width: 40px;
+    }
+    .lbl {
+      display: none;
+    }
+    .stage {
+      padding: var(--space-3);
+    }
+    .frame {
+      width: min(100%, calc(50vh * var(--ratio, 1.7778)));
+    }
+  }
+  /* the smallest phones: the scrubber shows the length, so the time is just the playhead */
+  @media (max-width: 360px) {
+    .dur {
       display: none;
     }
   }

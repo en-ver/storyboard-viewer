@@ -105,6 +105,22 @@ describe('sbd serve', () => {
     expect(body.issues.filter((i: { severity: string }) => i.severity === 'error')).toEqual([]);
   });
 
+  it('lists network links only when listening on all interfaces', async () => {
+    const ex = exampleCopy();
+    cleanups.push(ex.cleanup);
+    const { srv } = await serve(ex.dir);
+    expect(srv.networkUrls).toEqual([]);
+    const lan = await startServer(ProjectStore.open(ex.dir), {
+      port: 0,
+      host: '0.0.0.0',
+      webRoot: null,
+      register: false,
+    });
+    cleanups.push(() => lan.close());
+    expect(lan.url).toBe(`http://localhost:${lan.port}/`);
+    for (const u of lan.networkUrls) expect(u).toMatch(new RegExp(`^http://[\\d.]+:${lan.port}/$`));
+  });
+
   it('serves media with HTTP Range support', async () => {
     const ex = exampleCopy();
     cleanups.push(ex.cleanup);

@@ -1,6 +1,6 @@
 {
   "name": "@storyboard-viewer/cli",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "The `sbd` command line: create, validate, pack and serve .sbd storyboards, plus an MCP server for agents.",
   "license": "MIT",
   "homepage": "https://github.com/swaymun/storyboard-viewer#readme",

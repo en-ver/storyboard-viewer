@@ -130,6 +130,10 @@ async function inPrivateFileSystem(h: FileSystemHandle): Promise<boolean> {
   }
 }
 
+function narrowScreen(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(max-width: 600px)').matches;
+}
+
 class AppState {
   source = $state.raw<ProjectSource | null>(null);
   project = $state.raw<SbdProject | null>(null);
@@ -157,8 +161,11 @@ class AppState {
   print = $state.raw<PrintOptions | null>(null);
   /** Print mode opened by a URL with `chrome=0` (headless export): no toolbar. */
   printChrome = $state(true);
+  // Phones start on the Board (pictures with their lines); the Script view hides its shot rail there.
   storyView = $state<StoryView>(
-    pref<StoryView>('story-view', 'script') === 'board' ? 'board' : 'script',
+    pref<StoryView>('story-view', narrowScreen() ? 'board' : 'script') === 'board'
+      ? 'board'
+      : 'script',
   );
   /** Asks the script editor to put the cursor on a line (Board → "Edit in script"). */
   revealLine = $state.raw<{ id: string } | null>(null);

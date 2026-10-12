@@ -1415,4 +1415,29 @@
   .editor-host :global(.sb-lineless .sb-title) {
     font-weight: 500;
   }
+  /* phones: a slimmer page margin and screenplay indents, so dialogue isn't three words wide */
+  @media (max-width: 600px) {
+    .editor-host :global(.cm-editor) {
+      font-size: 13px;
+    }
+    .editor-host :global(.cm-content) {
+      padding-top: 20px;
+    }
+    .editor-host :global(.cm-line) {
+      padding: 0 14px 0 14px;
+    }
+    .editor-host :global(.cm-fx-character) {
+      padding-left: calc(14px + 30%) !important;
+    }
+    .editor-host :global(.cm-fx-parenthetical) {
+      padding-left: calc(14px + 20%) !important;
+    }
+    .editor-host :global(.cm-fx-dialogue) {
+      padding-left: calc(14px + 8%) !important;
+      padding-right: calc(14px + 4%) !important;
+    }
+    .editor-host :global(.cm-fx-lyrics) {
+      padding-left: calc(14px + 8%) !important;
+    }
+  }
 </style>

@@ -6,6 +6,29 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-10-11
+
+### Fixed
+
+- **Works on phones, at least for viewing.** Below 600 px wide: the menus sit on the first row
+  of the header and Story / Canvas / Assets on a second, full-width row (they used to overlap);
+  menus open across the screen instead of off its right edge; the player bar keeps play, the
+  time, the scrubber and icon-only Soundtrack / Animatic buttons (it used to push the page to
+  about 550 px wide, so the phone zoomed out); the script uses slimmer margins and indents, so
+  dialogue isn't three words a line; vertical (9:16) pictures on the Board and in the animatic
+  are about half the screen tall instead of more than a full screen; Shot details open as a
+  full-screen sheet; Assets show two cards a row. The app fills the visible height, so the
+  player bar is not hidden under the browser's toolbar.
+- Phones open the Story tab on the Board (pictures with their script lines) until you pick a
+  layout; the Script view hides its shot cards on small screens.
+
+### Added
+
+- **Watch your agent from your phone.** `sbd mcp --serve --host 0.0.0.0` (and `sbd serve
+--host 0.0.0.0`) listens on your network: `get_viewer_url` then also returns `network_urls`,
+  links that open from a phone on the same Wi-Fi or tailnet, and `sbd serve` prints them. The
+  viewer has no sign-in, so only do this on a network you trust (Tailscale is a good fit).
+
 ## [0.5.2] — 2026-10-07
 
 ### Fixed

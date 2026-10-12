@@ -1,6 +1,6 @@
 {
   "name": "@storyboard-viewer/format",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "The .sbd (Storyboard Document) format: types, JSON Schema validation, project model and edit operations, Fountain parsing, line-ID re-anchoring, zip pack/unpack.",
   "license": "MIT",
   "homepage": "https://github.com/swaymun/storyboard-viewer#readme",

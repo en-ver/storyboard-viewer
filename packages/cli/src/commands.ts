@@ -370,6 +370,7 @@ export const COMMANDS: readonly Command[] = [
         log: (m) => io.err(m),
       });
       io.out(`Storyboard Viewer: ${srv.url}`);
+      for (const u of srv.networkUrls) io.out(`  on your network: ${u}`);
       io.out(`Serving ${store.path}. Press Ctrl+C to stop.`);
       if (values['open']) openBrowser(srv.url);
       return untilSignal(() => srv.close());
@@ -377,7 +378,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: 'mcp',
-    usage: 'sbd mcp [path] [--serve] [--port 4400]',
+    usage: 'sbd mcp [path] [--serve] [--port 4400] [--host 127.0.0.1]',
     summary: 'Run the MCP server over stdio (for Claude Code, Codex, …)',
     details:
       'With --serve the same process also serves the viewer, and get_viewer_url returns its URL.',

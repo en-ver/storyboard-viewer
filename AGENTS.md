@@ -12,6 +12,9 @@ agents working on this repository. The format itself is specified in [SPEC.md](S
    refreshes by itself.
 4. Always give the user the viewer link from `get_viewer_url`. In the Claude or Codex desktop app,
    open it in the **in-app browser** so the user sees the storyboard next to the chat.
+   If the user is on a phone, the localhost link won't open there: give them one of
+   `network_urls` (present when the server runs with `--host 0.0.0.0`; otherwise tell them to add
+   that flag to the `sbd mcp --serve` command).
 5. Call `validate` after a batch of edits and fix errors before you say you are done.
 6. Talk to the user in plain words. Many users are not technical.
 

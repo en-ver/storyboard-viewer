@@ -141,4 +141,19 @@
     top: calc(100% + 3px);
     z-index: 40;
   }
+  /* phones: menus span the screen under the bar instead of running off its right edge */
+  @media (max-width: 600px) {
+    .pop {
+      position: fixed;
+      left: 8px;
+      right: 8px;
+      top: 44px;
+    }
+    .pop :global(.menu-list) {
+      max-height: calc(100dvh - 120px);
+    }
+    .pop :global([role^='menuitem']) {
+      padding: 9px 10px;
+    }
+  }
 </style>
