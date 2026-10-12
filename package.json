@@ -20,7 +20,8 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm --filter @storyboard-viewer/web dev",
-    "test": "pnpm -r test",
+    "test": "node --test scripts/test/*.test.mjs && pnpm -r test",
+    "test:image": "SBD_DOCKER_TESTS=1 node --test scripts/test/image-build.test.mjs",
     "typecheck": "pnpm -r typecheck && tsc -p e2e",
     "lint": "oxlint && prettier --check . && pnpm typecheck",
     "format": "prettier --write .",
