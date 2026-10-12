@@ -9,6 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
@@ -245,6 +246,55 @@ test('retains non-font MIT licenses, additional NOTICE/COPYING files and web acc
   assert(records.every((pkg) => !Object.hasOwn(pkg, 'author')));
 });
 
+test('retains the full original StackBlur source notice in the index and served artifacts', (t) => {
+  const f = fixture(t);
+  const root = f.addBrowser('konva');
+  const require = createRequire(new URL('../../apps/web/package.json', import.meta.url));
+  const original = readFileSync(require.resolve('konva/lib/filters/Blur.js'), 'utf8');
+  assert.match(original, /Copyright \(c\) 2010 Mario Klingemann/);
+  assert.match(original, /Permission is hereby granted, free of charge/);
+  assert.match(original, /included in all copies or substantial portions of the Software/);
+  assert.match(original, /THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND/);
+  assert.match(original, /OTHER DEALINGS IN THE SOFTWARE/);
+  f.put(join(root, 'lib/filters/Blur.js'), original);
+  const mapPath = join(f.web, 'assets/app.js.map');
+  const map = JSON.parse(readFileSync(mapPath, 'utf8'));
+  map.sources.push(relative(dirname(mapPath), join(root, 'lib/filters/Blur.js')));
+  f.put(mapPath, map);
+  f.syncWeb();
+  f.check();
+  const file = 'embedded/lib/filters/Blur.js';
+  for (const dir of ['licenses', 'web/licenses'])
+    assert.equal(readFileSync(join(f.deployed, dir, 'konva/1.0.0', file), 'utf8'), original);
+  const records = JSON.parse(readFileSync(join(f.deployed, 'licenses/packages.json'), 'utf8'));
+  assert(records.find((pkg) => pkg.name === 'konva').notices[file]);
+  assert(
+    readFileSync(join(f.deployed, 'licenses/THIRD-PARTY-NOTICES.txt'), 'utf8').includes(original),
+  );
+});
+
+test('copies mapped source headers without rewriting terms, not unrelated package sources', (t) => {
+  const f = fixture(t);
+  const root = f.addBrowser('worker-runtime');
+  const original =
+    '/*\r\n Copyright 2020 Google LLC\r\n MIT-style license in LICENSE\r\n*/\r\nexport const worker = true;\r\n';
+  f.put(join(root, 'dist/index.js'), original);
+  f.put(join(root, 'unused.js'), '/*! Copyright an unrelated source author */');
+  f.check();
+  assert.equal(
+    readFileSync(
+      join(f.deployed, 'web/licenses/worker-runtime/1.0.0/embedded/dist/index.js'),
+      'utf8',
+    ),
+    original,
+  );
+  const records = JSON.parse(readFileSync(join(f.deployed, 'licenses/packages.json'), 'utf8'));
+  const record = records.find((pkg) => pkg.name === 'worker-runtime');
+  assert(record.notices['embedded/dist/index.js']);
+  assert(!record.notices['embedded/unused.js']);
+  assert(!record.notices['embedded/package.json']);
+});
+
 test('retains font notices alongside JavaScript notices', (t) => {
   const f = fixture(t);
   const name = '@fontsource/example';
@@ -320,6 +370,9 @@ test('rejects missing maps, missing mapped sources and unreviewed license identi
   assert.throws(() => browserPackages(f.source), /Missing browser module map/);
   f.put(join(f.web, 'assets/app.js.map'), { sources: ['../../node_modules/missing/index.js'] });
   assert.throws(() => browserPackages(f.source), /Missing bundled module source/);
+  f.put(join(f.web, 'assets/app.js.map'), {
+    sources: [relative(join(f.web, 'assets'), join(f.browser, 'index.js'))],
+  });
   f.put(join(f.browser, 'package.json'), {
     name: 'browser-runtime',
     version: '1.0.0',

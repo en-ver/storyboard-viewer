@@ -298,11 +298,11 @@ export async function prepareBrowserNotices(source) {
 
 // Maps are produced only for image builds. They cover lazy chunks and the
 // separately bundled Workbox service worker, not just manifest dependencies.
-export function browserPackages(source) {
+function browserModules(source) {
   const web = join(source, 'apps/web/dist');
   const output = files(web);
   const publicFiles = files(join(source, 'apps/web/public'));
-  const roots = new Set();
+  const modules = new Map();
   for (const file of Object.keys(output).filter((path) => path.endsWith('.js'))) {
     if (publicFiles[file]) continue;
     const mapPath = join(web, `${file}.map`);
@@ -323,13 +323,21 @@ export function browserPackages(source) {
       for (let root = dirname(path); ; root = dirname(root)) {
         const manifest = join(root, 'package.json');
         if (existsSync(manifest) && json(manifest).name) {
-          if (!inside(realpathSync(join(source, 'packages')), root)) roots.add(root);
+          if (!inside(realpathSync(join(source, 'packages')), root)) {
+            if (!modules.has(root)) modules.set(root, new Set());
+            modules.get(root).add(path);
+          }
           break;
         }
         assert(dirname(root) !== root, `Missing bundled package manifest: ${module}`);
       }
     }
   }
+  return modules;
+}
+
+export function browserPackages(source) {
+  const roots = new Set(browserModules(source).keys());
   const prebundled = [];
   for (const root of roots) {
     const pkg = json(join(root, 'package.json'));
@@ -353,6 +361,7 @@ export function browserPackages(source) {
 }
 
 export function copyBrowserNotices(source, deployed, roots = browserPackages(source)) {
+  const modules = browserModules(source);
   const licenses = join(deployed, 'licenses');
   const originalWeb = files(join(deployed, 'web'));
   const publicFiles = files(join(source, 'apps/web/public'));
@@ -398,6 +407,24 @@ export function copyBrowserNotices(source, deployed, roots = browserPackages(sou
       }
     }
     copyNotices(root);
+    // Inspect only original modules identified by the build maps, including lazy
+    // chunks and Workbox. Copy notice-bearing files in full: no comment parsing,
+    // reconstructed license terms or loss of whitespace/context. These are
+    // indexed notice artifacts, not additional application modules.
+    for (const path of [...(modules.get(realpathSync(root)) ?? [])].toSorted()) {
+      const text = readFileSync(path, 'utf8');
+      if (
+        !/copyright|@license|SPDX-License-Identifier|permission is hereby granted|licensed under|license notice/i.test(
+          text,
+        )
+      )
+        continue;
+      const rel = join('embedded', relative(realpathSync(root), path));
+      assert(inside(root, path), `External embedded notice: ${path}`);
+      mkdirSync(dirname(join(dest, rel)), { recursive: true });
+      copyFileSync(path, join(dest, rel));
+      originals[rel] = hash(path);
+    }
     if (pkg.prebundledIn) {
       assert.equal(pkg.prebundledIn, 'hls.js@1.7.3');
       const notice = hlsBundledNotices[pkg.name];

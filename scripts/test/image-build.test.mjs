@@ -117,6 +117,21 @@ test(
     assert.equal(Object.keys(inventory.find(pkg => pkg.name === 'mediabunny').source).length, 67);
     assert.match(fs.readFileSync('/app/licenses/konva/10.7.1/LICENSE', 'utf8'), /Eric Rowell/);
     assert.match(fs.readFileSync('/app/licenses/konva/10.7.1/LICENSE', 'utf8'), /Anton Lavrenov/);
+    const blurFile = 'embedded/lib/filters/Blur.js';
+    const blur = fs.readFileSync('/app/licenses/konva/10.7.1/' + blurFile, 'utf8');
+    // Digest of the complete original file in the frozen Konva 10.7.1 package.
+    assert.equal(crypto.createHash('sha256').update(blur).digest('hex'), '3044af7ab9c2a49db02e97a2cbc5dbef6b6ce6fba9e600b79c1520078e37e847');
+    assert.match(blur, /Copyright \\(c\\) 2010 Mario Klingemann/);
+    assert.match(blur, /Permission is hereby granted, free of charge/);
+    assert.match(blur, /included in all copies or substantial portions of the Software/);
+    assert.match(blur, /THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND/);
+    assert.match(blur, /OTHER DEALINGS IN THE SOFTWARE/);
+    assert.equal(inventory.find(pkg => pkg.name === 'konva').notices[blurFile], crypto.createHash('sha256').update(blur).digest('hex'));
+    assert.equal(fs.readFileSync('/app/web/licenses/konva/10.7.1/' + blurFile, 'utf8'), blur);
+    for (const dir of ['/app/licenses', '/app/web/licenses']) assert(fs.readFileSync(dir + '/THIRD-PARTY-NOTICES.txt', 'utf8').includes(blur));
+    assert(inventory.find(pkg => pkg.name === 'konva').notices['embedded/lib/Global.js']);
+    assert(inventory.find(pkg => pkg.name === 'workbox-core').notices['embedded/_private/Deferred.js']);
+    assert(inventory.find(pkg => pkg.name === 'workbox-routing').notices['embedded/Router.js']);
     assert.match(fs.readFileSync('/app/licenses/@cfworker/json-schema/4.1.1/LICENSE.md', 'utf8'), /2020 Jeremy Danyow/);
     assert.match(fs.readFileSync('/app/licenses/hls.js/1.7.3/LICENSE', 'utf8'), /Brightcove/);
     assert.match(fs.readFileSync('/app/licenses/url-toolkit/2.2.5/LICENSE', 'utf8'), /2016 Tom Jenkinson/);
