@@ -492,7 +492,7 @@ describe('shared recent storyboards', () => {
     // only paths from the list
     expect((await open('/etc')).status).toBe(403);
     // this server's own storyboard: its own URL
-    expect(await json(await open(b.dir))).toEqual({ url: srvB.url });
+    expect(await json(await open(b.dir))).toEqual({ url: srvB.url, current: true });
     // A is not running: a new server in this process
     const opened = await json(await open(a.dir));
     expect(opened.url).not.toBe(srvB.url);

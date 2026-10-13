@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { mergeRecents, sharedToEntry, timeAgo, type RecentEntry } from './cache';
+import { describe, expect, it, vi } from 'vitest';
+import { mergeRecents, openShared, sharedToEntry, timeAgo, type RecentEntry } from './cache';
 
 const local = (id: string, openedAt: number, path?: string): RecentEntry => ({
   id,
@@ -55,6 +55,41 @@ describe('recent storyboards', () => {
     ]);
     expect(merged[0]!.openedAt).toBe(900);
     expect(mergeRecents([local('zip:x', 1)], [])).toHaveLength(1);
+  });
+
+  it('reopens the current storyboard at the requesting origin, including an explicit base', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ url: 'http://viewer:4400/', current: true })),
+      );
+    vi.stubGlobal('fetch', fetch);
+    try {
+      expect(await openShared('browser', '/storyboard.sbd')).toBe('/');
+      expect(await openShared('browser', '/storyboard.sbd', 'http://localhost:4401/proxy')).toBe(
+        'http://localhost:4401/',
+      );
+      expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+        '/api/open',
+        'http://localhost:4401/proxy/api/open',
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the advertised URL for another storyboard', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValue(new Response(JSON.stringify({ url: 'http://localhost:4402/' }))),
+    );
+    try {
+      expect(await openShared('browser', '/other.sbd')).toBe('http://localhost:4402/');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('says how long ago', () => {

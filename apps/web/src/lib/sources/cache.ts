@@ -291,14 +291,22 @@ export async function putSharedThumb(client: string, thumb: Blob, base = ''): Pr
   }
 }
 
-/** Asks `sbd serve` for a viewer of a storyboard on the shared list; returns its URL. */
+/** Asks for a viewer; the current storyboard reopens at the requesting origin's root. */
 export async function openShared(client: string, path: string, base = ''): Promise<string> {
   const res = await write(`${base}/api/open`, client, {
     method: 'POST',
     body: JSON.stringify({ path }),
   });
-  const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+  const body = (await res.json().catch(() => ({}))) as {
+    url?: string;
+    current?: boolean;
+    error?: string;
+  };
   if (!res.ok || !body.url) throw new Error(body.error ?? `Server error ${res.status}`);
+  // The server's advertised URL can use a container's hostname or internal port.
+  if (body.current === true) {
+    return base ? new URL('/', new URL(base, globalThis.location?.href)).href : '/';
+  }
   return body.url;
 }
 

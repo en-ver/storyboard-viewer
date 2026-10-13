@@ -13,7 +13,7 @@
  *   GET /api/recent            shared recent storyboards (see recent.ts), newest first
  *   DELETE /api/recent[?path=] remove one entry (or clear the list)
  *   PUT /api/recent/thumbnail  {thumbnail: data URI} → the picture for this server's storyboard
- *   POST /api/open             {path} (a path from the recent list) → {url} of a viewer for it:
+ *   POST /api/open             {path} (a path from the recent list) → {url, current?: true}:
  *                              an already running one, or a new server started by this process
  *   GET /*                     the web app (SPA fallback to index.html, marked as served)
  *
@@ -495,7 +495,10 @@ export async function startServer(
         sendError(res, 404, `No storyboard at ${target} any more`);
         return;
       }
-      sendJson(res, 200, { url: await viewerFor(target) });
+      sendJson(res, 200, {
+        url: await viewerFor(target),
+        ...(target === store.path ? { current: true } : {}),
+      });
       return;
     }
     const client = String(req.headers['x-sbd-client']);

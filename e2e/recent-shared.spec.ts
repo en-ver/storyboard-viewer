@@ -115,6 +115,44 @@ test('recent storyboards are shared between ports and reopen from any of them', 
   expect(JSON.parse(readFileSync(join(CONFIG, 'recent.json'), 'utf8')).recent).toEqual([]);
 });
 
+test('save and reopen the current recent storyboard at the browser origin', async ({ page }) => {
+  const story = copy('current', 'Current Story');
+  const base = `http://localhost:${PORT_B + 6}`;
+  await serve(story, PORT_B + 6);
+  await page.goto(`${base}/`);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Current Story');
+
+  await page.locator('#view-menu').click();
+  await page.locator('[data-command="view-board"]').click();
+  await page.locator('[data-shot-id="climb"] .select').click();
+  await page.locator('#shot-title-input').fill('Saved current shot');
+  await page.locator('#shot-title-input').press('Tab');
+  await expect(page.locator('#save-status')).toHaveText('Saved');
+  expect(JSON.parse(readFileSync(join(story, 'shots/climb.json'), 'utf8')).title).toBe(
+    'Saved current shot',
+  );
+
+  // A container advertises its internal origin. Keep the real response's current marker,
+  // but replace its absolute URL to demonstrate reopening without navigating to that host.
+  await page.route(`${base}/api/open`, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    expect(body).toEqual({ url: `${base}/`, current: true });
+    await route.fulfill({
+      response,
+      json: { ...body, url: 'http://viewer:4400/' },
+    });
+  });
+  await page.goto(`${base}/?source=local`);
+  await page
+    .locator(`#recent-list li[data-recent="served:${story}"]`)
+    .getByRole('button', { name: /^Open Current Story/ })
+    .click();
+  await expect(page).toHaveURL(`${base}/`);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Current Story');
+  await expect(page.locator('[data-shot-id="climb"]')).toContainText('Saved current shot');
+});
+
 test('/api/open only opens storyboards from the recent list', async ({ request }) => {
   const c = copy('gamma', 'Gamma');
   await serve(c, PORT_B + 5);
