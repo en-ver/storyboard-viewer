@@ -1,0 +1,38 @@
+# Copy to your own deployment directory as docker-compose.yml.
+# Select a full image reference. Prepare existing relative directories before startup.
+# Use an explicit, unique --project-name for this production or task.
+services:
+  viewer:
+    image: ${SBD_IMAGE:?Set SBD_IMAGE to a full published image reference}
+    platform: linux/amd64
+    pull_policy: missing
+    init: true
+    user: '${SBD_UID:-1000}:${SBD_GID:-1000}'
+    command: ['serve', '/storyboard.sbd', '--host', '0.0.0.0', '--port', '4400']
+    environment:
+      NODE_ENV: production
+      SBD_CONFIG_DIR: /config
+      HOME: /tmp
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: 'no'
+    stop_grace_period: 10s
+    ports:
+      - '127.0.0.1:${SBD_PORT:-4400}:4400'
+    volumes:
+      - type: bind
+        source: ./storyboard.sbd
+        target: /storyboard.sbd
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./config
+        target: /config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./tmp
+        target: /tmp
+        bind:
+          create_host_path: false

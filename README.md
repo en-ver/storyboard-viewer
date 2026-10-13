@@ -141,127 +141,206 @@ image tool) into shots, arrange layers on the canvas and keep everything in orde
 
 ## Run with Docker
 
-Use the source checkout and branch you want to deploy. Run these commands from its root.
-Docker installs dependencies and builds the app once, not at container startup.
+Choose one standalone configuration. Source developers use the repository's
+`docker-compose.yml`. Consumers copy `docker-compose.template.yml` into their own
+deployment directory as `docker-compose.yml` and select a published image.
+The consumer file needs neither a source checkout nor a Dockerfile.
+
+Docker and Compose must be installed and running. Compose v5.1.2 is the verified support
+floor for these instructions. This does not establish that earlier versions cannot work.
+The viewer has no sign-in. Keep the port bound to `127.0.0.1`.
+
+Each file starts exactly one `viewer`. Give every checkout, production, or task a unique
+`--project-name` and an unused host port. Use the same name, directory, and environment
+for subsequent commands. Do not combine the files or start the template from the source root.
+
+### Source development
+
+Run these commands from the intended checkout root. The developer file builds the root
+Dockerfile for the Docker engine's native architecture. It uses `storyboard-viewer:dev`
+and `pull_policy: build`. If that tag belongs to another task, stop before replacing it.
+The default host port is 4410. No published image or AMD64 emulation is needed.
+
+Prepare an existing valid unpacked storyboard at `.dev/storyboard.sbd`, plus existing
+`.dev/config` and `.dev/tmp` directories. These are ignored local development inputs.
+Do not mount repository examples or production originals for a trial. Copy only an input
+that you are authorized to edit.
+
+For a deliberately empty disposable fixture, use the built CLI's `new` command.
+First install the frozen dependencies and build with the repository's pinned pnpm 8.15.6.
+Check permissions using the guidance below before startup. Then run:
+
+```sh
+npx -y pnpm@8.15.6 install --frozen-lockfile
+npx -y pnpm@8.15.6 build
+mkdir -p .dev/config .dev/tmp
+node packages/cli/dist/cli.js new .dev/storyboard.sbd --preset blank --title "Docker trial"
+node packages/cli/dist/cli.js validate .dev/storyboard.sbd
+export SBD_PROJECT=storyboard-dev-my-task
+export SBD_PORT=4410
+docker compose --project-name "$SBD_PROJECT" config
+docker compose --project-name "$SBD_PROJECT" up -d --build
+docker compose --project-name "$SBD_PROJECT" ps
+```
+
+Plain `docker compose` discovers
+`docker-compose.yml`. An explicit `--file docker-compose.yml` selects the same file.
+Remove or resolve conflicting local Compose files or selection variables before using automatic discovery.
+Open `http://localhost:4410/`, or the host port you selected.
+
+Docker installs dependencies and builds the app into the image, not at container startup.
 The runtime has no browser or ffmpeg executable. CLI PDF export is not included.
+Ordinary `pnpm test` checks both files without Docker. To opt in to structured Compose
+configuration checks, run `SBD_COMPOSE_TESTS=1 node --test scripts/test/compose.test.mjs`.
+This check does not build, pull, or start an image. The existing packaging baseline runs
+separately through `pnpm test:image`.
+
+### Consumer deployment
+
+Use an existing production or task directory. Obtain the template from the reviewed repository
+revision you intend to use, then copy it there as `docker-compose.yml`.
+No source clone is required if you already have the verified template.
+Keep the production's canonical unpacked `.sbd` in its existing semantic location.
+The default `./storyboard.sbd` binding is an example, not a required production layout.
+If the canonical folder is elsewhere inside that production, change only its relative bind source.
+
+If `docker-compose.yml` already exists, stop before copying. Review that file and authorize
+any replacement separately. From your chosen deployment directory, copy the verified template
+and prepare its private state directories:
 
 ```sh
-REPO="$(pwd)"
-docker build --tag storyboard-viewer:local --file "$REPO/Dockerfile" "$REPO"
-cp "$REPO/compose.template.yaml" "$REPO/compose.yaml"
+TEMPLATE='/path/to/verified/docker-compose.template.yml'
+test ! -e docker-compose.yml && test ! -L docker-compose.yml && cp "$TEMPLATE" ./docker-compose.yml
+mkdir -p config tmp
 ```
 
-Edit the Git-ignored `compose.yaml` before startup. The template defines two services,
-`film-a` and `film-b`. Set each service's bind source to its own existing, absolute
-unpacked `.sbd` folder path. Use different localhost ports and keep separate named
-configuration volumes. Missing source folders cause an error instead of being created.
+Use equivalent relative production-owned state paths if needed. All three bindings use
+`create_host_path: false`. Docker does not create missing input directories.
+Make sure that the selected canonical unpacked storyboard already exists and is valid.
+Do not use a packed `.sbd` file for this binding.
 
-For a trial, copy an example to a disposable folder. Do not mount repository examples for editing.
-Keep `compose.base.yaml` beside `compose.yaml`. Each service uses external `extends`
-to inherit runtime defaults. Start only `compose.yaml`. Do not combine it with the base
-using multiple `--file` arguments, which would start an extra `viewer` service.
+Select a full published image reference, preferably its immutable digest. The consumer file
+requires `SBD_IMAGE`, uses `platform: linux/amd64`, and has no build, base-file, or environment-file dependency.
+AMD64 images need working AMD64 emulation on ARM64 hosts. Establish that capability before deployment.
+These instructions do not install an emulator.
 
-First, display the resolved configuration:
+From the deployment directory, set your selected reference and a unique project name:
 
 ```sh
-docker compose --file "$REPO/compose.yaml" config
+export SBD_IMAGE='ghcr.io/<lowercase-owner>/<lowercase-repository>@sha256:<published-digest>'
+export SBD_PROJECT=storyboard-my-production
+export SBD_PORT=4400
+docker compose --project-name "$SBD_PROJECT" config
+docker compose --project-name "$SBD_PROJECT" pull viewer
+docker compose --project-name "$SBD_PROJECT" up -d --no-build --pull never
+docker compose --project-name "$SBD_PROJECT" ps
 ```
 
-Make sure that the paths, ports, and volumes match your choices. Then start the viewers:
+Replace the placeholders with the actual published identity. Make sure that the resolved paths,
+identity, and port match your production before starting. Open `http://localhost:4400/`,
+or the host port you selected. The template uses `pull_policy: missing` for ordinary startup.
+The explicit pull above obtains the chosen image before the no-pull startup.
 
-```sh
-docker compose --file "$REPO/compose.yaml" up -d --no-build --pull never
-docker compose --file "$REPO/compose.yaml" ps
-```
-
-With the template ports, open `http://localhost:4401/` and `http://localhost:4402/`.
-The viewer has no sign-in. Keep ports bound to `127.0.0.1`.
-Mount only the intended storyboard folder. For linked media, preserve relative paths and use
-read-only mounts where possible. Never mount your home, Docker socket, or credentials.
-
-Containers share the image, not storyboards or configuration. Each named volume stores its
-service's recent list and viewer discovery state under `/config`.
-Browser saves write to the host storyboard. Coordinate writers as with the native app.
+Alternatively, replace the template's entire `image:` value with the selected literal reference.
+Then `SBD_IMAGE` is unnecessary. Never embed authentication tokens in YAML, an image reference,
+or retained environment files. Do not mount your home, repository metadata, credentials,
+or the Docker socket. Mount only intended inputs. Preserve relative linked-media paths,
+and add only specifically needed read-only mounts.
 
 ### Published images (GHCR)
 
 The `Publish Docker image` workflow builds the existing Dockerfile for `linux/amd64` and
-publishes to GitHub Container Registry (GHCR). It uses the current repository's owner and name,
-not a fixed upstream namespace. Image names are lowercase: `Owner/Repository` becomes
-`ghcr.io/owner/repository`. AMD64 support does not establish native ARM64 support.
+publishes to GitHub Container Registry (GHCR). The image name comes from the executing
+repository's owner and name, not a fixed upstream namespace.
+`Owner/Repository` becomes `ghcr.io/owner/repository`.
+OCI labels identify that repository and the exact source revision.
+AMD64 publication does not establish native ARM64 support. Native source development is separate.
 
 Every trusted branch push can publish and consume GitHub Actions runner time, including
 pushes in a fork. Pull requests, tag events, and branch-deletion pushes do not publish.
 Manual dispatch uses the selected branch and requires the workflow on the default branch.
-Before merge, a later authorized push to a feature branch containing this workflow can
-publish the first image. Adding this file locally does not publish anything.
+An authorized nondefault branch push can publish before merge. Adding the workflow locally
+does not publish anything.
 
-Each publication uses `branch-<normalized-branch>` and `sha-<full-40-character-commit>` tags.
-Only the repository's current default branch also gets `latest`. A nondefault branch named
-`latest` gets `branch-latest`, not `latest`. There are no package-version or release tags.
-Normalization can make different branch names collide: `feature/foo` and `feature-foo`
-both use `branch-feature-foo`. Branch and SHA tags are mutable names, even with a full commit SHA.
-A published digest (`@sha256:` followed by 64 hexadecimal characters) identifies fixed image content.
+Publications use `branch-<normalized-branch>` and `sha-<full-40-character-commit>` tags.
+Normalization replaces runs outside `[a-zA-Z0-9._-]` with `-`, preserves case, and limits
+the suffix after `branch-` to 121 characters. Different names can collide, including
+`feature/foo` and `feature-foo`, or names truncated to the same suffix.
+Only the current default branch also gets `latest`, through the case-sensitive
+`{{is_default_branch}}` helper. A nondefault branch named `latest` gets `branch-latest`.
+There are no package-version or release tags.
+Branch and SHA tags are mutable names. A digest identifies fixed image content.
 
-If a published image is available, choose its repository and digest, then pull it explicitly:
-
-```sh
-IMAGE='ghcr.io/<lowercase-owner>/<lowercase-repository>@sha256:<published-digest>'
-docker pull "$IMAGE"
-```
-
-For private images, authenticate with an account that can read the package before pulling.
-The publishing job uses its repository's `GITHUB_TOKEN`. That token does not authenticate your local deployment.
+Private pulls require an account with package-read access. Establish authentication separately
+before pulling. The publishing job's `GITHUB_TOKEN` does not authenticate your local Docker client.
 Fork owners can need to enable Actions. Organization policy or existing-package permissions
-can block publication. New packages default to private. Package visibility and account
-permissions are separate administrative choices, not deployment steps.
+can block publication. New packages default to private.
+Authentication, package visibility, and account permissions are separate administrative choices.
 
-Save browser work and pause editing before replacing running containers. Select the pulled image
-through the existing `SBD_IMAGE` variable for each Compose command:
+### Permissions, state, and updates
+
+The default container identity is `1000:1000`. All three host directories must be writable
+by the chosen nonzero identity. Startup does not change host ownership or permissions.
+Do not select UID 0. The interpolation permits overrides but does not enforce nonzero values.
+Do not use `chmod 777` or broad ownership changes to bypass errors.
+
+On native Linux, use your nonzero host IDs when that user owns the three directories:
 
 ```sh
-SBD_IMAGE="$IMAGE" docker compose --file "$REPO/compose.yaml" up -d --no-build --pull never --force-recreate
-SBD_IMAGE="$IMAGE" docker compose --file "$REPO/compose.yaml" ps
+export SBD_UID="$(id -u)"
+export SBD_GID="$(id -g)"
 ```
 
-The base configuration keeps `pull_policy: never`. Compose does not fetch an image for you.
-Without `SBD_IMAGE`, it still uses `storyboard-viewer:local`. The local build instructions above
-remain available. Neither publication nor pulling an image changes running viewers by itself.
+Check that `SBD_UID` is not 0. Keep these values for every Compose command.
+Prepare permissions only on directories you own and are authorized to change.
+macOS engine permission mapping differs from native Linux. Do not infer Linux behavior
+from OrbStack results.
 
-### Permissions and updates
+The container root is read-only. The image remains build-once, with immutable application
+files under `/app`. The three writable binds have separate purposes:
 
-The default user and group IDs are `1000:1000`. The storyboard must be writable by that identity.
-Docker initializes new configuration volumes from the image-owned directory.
-Startup does not change host permissions or ownership.
+- `/storyboard.sbd` stores browser and MCP edits in the host storyboard.
+- `/config/recent.json` stores the shared recent list, through `SBD_CONFIG_DIR=/config`.
+- `/tmp` provides disk-backed upload staging and `HOME=/tmp`. Viewer discovery uses
+  `/tmp/storyboard-viewer/serve-<path-hash>.json`, not `/config`.
 
-On native Linux, optional `SBD_UID` and `SBD_GID` variables select different nonzero numeric IDs.
-That identity also needs writable configuration storage. For each service, replace the
-`/config` volume with a bind to its own existing, writable host directory.
-Set `bind.create_host_path: false` there too. Use the same variables for all Compose commands.
-Do not use root or blanket `chmod`/`chown` overrides to bypass permission errors.
-macOS engine permission mapping differs from native Linux.
+Keep adequate disk space for media staging. These binds survive container recreation.
+The files in the temporary bind are runtime state, not production deliverables.
+Do not share configuration or temporary directories between independent deployments.
 
-Startup and restart need no package or registry downloads. Remote linked media is not covered
-by this offline behavior. Restart keeps the current image.
-To update, save browser work and pause editing. Build from the intended checkout, then recreate:
+Before an update, save browser work and pause all writers. For source development, rebuild
+and recreate from the selected checkout:
 
 ```sh
-docker build --tag storyboard-viewer:local --file "$REPO/Dockerfile" "$REPO" &&
-  docker compose --file "$REPO/compose.yaml" up -d --no-build --pull never --force-recreate
+docker compose --project-name "$SBD_PROJECT" up -d --build --force-recreate
 ```
 
-Use `docker compose --file "$REPO/compose.yaml" stop` to stop these services.
-Use `down` to remove their containers and network. Do not add `--volumes` unless you intend
-to delete their configuration. Neither command deletes the host storyboard.
-
-An MCP client can use standard input/output through a running service:
+For consumers, select the new digest or tag, explicitly pull it, then recreate:
 
 ```sh
-docker compose --file "$REPO/compose.yaml" exec -T film-a node /app/dist/cli.js mcp /storyboard.sbd
+docker compose --project-name "$SBD_PROJECT" pull viewer
+docker compose --project-name "$SBD_PROJECT" up -d --no-build --pull never --force-recreate
+```
+
+If `image:` is literal, edit that same value before pulling.
+With `pull_policy: missing`, a cached mutable tag such as `latest` is not an update check.
+Explicitly pull it before recreating. Publication or pulling alone does not change a running viewer.
+Restart keeps the current image. Startup from a present image needs no package downloads.
+Remote linked media is not covered by this offline behavior.
+
+Use `docker compose --project-name "$SBD_PROJECT" stop` to stop this viewer.
+Use `down` to remove this project's containers and network after confirming ownership.
+Do not add volume deletion or image-pruning options. Neither command deletes the host binds.
+Do not remove input, configuration, or temporary directories as part of container cleanup.
+
+An MCP client can use standard input/output through the running service:
+
+```sh
+docker compose --project-name "$SBD_PROJECT" exec -T viewer node /app/dist/cli.js mcp /storyboard.sbd
 ```
 
 Do not add `--serve`: the service already runs the viewer.
-This command is not a network MCP endpoint or automatic agent configuration.
+This is not a network MCP endpoint or automatic agent registration.
 Container discovery URLs are not host viewer URLs.
 
 ### Host folder changes and live refresh
@@ -282,7 +361,7 @@ Create needed subfolders before starting the viewer. If you add host subfolders 
 save all browser work and pause editing. Then restart only the affected service:
 
 ```sh
-docker compose --file "$REPO/compose.yaml" restart film-a
+docker compose --project-name "$SBD_PROJECT" restart viewer
 ```
 
 Restart registers existing directories. No image rebuild or restart of other viewers is needed.
