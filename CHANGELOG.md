@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- Repository-owned GHCR image publication for AMD64 on branch pushes and manual dispatch,
+  with branch and full-SHA tags, default-branch-only `latest`, and explicit image selection instructions.
 - Build-once Docker image and runtime-only Compose examples for separate localhost viewers,
   with nonroot permissions, private configuration, and manual deployment instructions.
 - Documented stale browser refresh after newly host-created folders on macOS with OrbStack

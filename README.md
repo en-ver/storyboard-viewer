@@ -183,6 +183,51 @@ Containers share the image, not storyboards or configuration. Each named volume 
 service's recent list and viewer discovery state under `/config`.
 Browser saves write to the host storyboard. Coordinate writers as with the native app.
 
+### Published images (GHCR)
+
+The `Publish Docker image` workflow builds the existing Dockerfile for `linux/amd64` and
+publishes to GitHub Container Registry (GHCR). It uses the current repository's owner and name,
+not a fixed upstream namespace. Image names are lowercase: `Owner/Repository` becomes
+`ghcr.io/owner/repository`. AMD64 support does not establish native ARM64 support.
+
+Every trusted branch push can publish and consume GitHub Actions runner time, including
+pushes in a fork. Pull requests, tag events, and branch-deletion pushes do not publish.
+Manual dispatch uses the selected branch and requires the workflow on the default branch.
+Before merge, a later authorized push to a feature branch containing this workflow can
+publish the first image. Adding this file locally does not publish anything.
+
+Each publication uses `branch-<normalized-branch>` and `sha-<full-40-character-commit>` tags.
+Only the repository's current default branch also gets `latest`. A nondefault branch named
+`latest` gets `branch-latest`, not `latest`. There are no package-version or release tags.
+Normalization can make different branch names collide: `feature/foo` and `feature-foo`
+both use `branch-feature-foo`. Branch and SHA tags are mutable names, even with a full commit SHA.
+A published digest (`@sha256:` followed by 64 hexadecimal characters) identifies fixed image content.
+
+If a published image is available, choose its repository and digest, then pull it explicitly:
+
+```sh
+IMAGE='ghcr.io/<lowercase-owner>/<lowercase-repository>@sha256:<published-digest>'
+docker pull "$IMAGE"
+```
+
+For private images, authenticate with an account that can read the package before pulling.
+The publishing job uses its repository's `GITHUB_TOKEN`. That token does not authenticate your local deployment.
+Fork owners can need to enable Actions. Organization policy or existing-package permissions
+can block publication. New packages default to private. Package visibility and account
+permissions are separate administrative choices, not deployment steps.
+
+Save browser work and pause editing before replacing running containers. Select the pulled image
+through the existing `SBD_IMAGE` variable for each Compose command:
+
+```sh
+SBD_IMAGE="$IMAGE" docker compose --file "$REPO/compose.yaml" up -d --no-build --pull never --force-recreate
+SBD_IMAGE="$IMAGE" docker compose --file "$REPO/compose.yaml" ps
+```
+
+The base configuration keeps `pull_policy: never`. Compose does not fetch an image for you.
+Without `SBD_IMAGE`, it still uses `storyboard-viewer:local`. The local build instructions above
+remain available. Neither publication nor pulling an image changes running viewers by itself.
+
 ### Permissions and updates
 
 The default user and group IDs are `1000:1000`. The storyboard must be writable by that identity.
