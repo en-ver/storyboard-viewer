@@ -8,10 +8,10 @@ All notable changes are listed here. The format follows
 
 ### Added
 
-- Repository-owned GHCR image publication for AMD64 on branch pushes and manual dispatch,
-  with branch and full-SHA tags, default-branch-only `latest`, and explicit image selection instructions.
+- Repository-owned GHCR publication targets ARM64 and AMD64 in one OCI image index on branch pushes and manual dispatch.
+  Branch and full-SHA tags, default-branch-only `latest`, and explicit image selection instructions remain unchanged.
 - Standalone `docker-compose.yml` for native source development and portable
-  `docker-compose.template.yml` for an AMD64 published image, with separate localhost ports,
+  `docker-compose.template.yml` for a published image selected by the Docker server's native architecture, with separate localhost ports,
   nonroot permissions, and persistent storyboard, configuration, and disk-backed temporary directories.
 - Documented stale browser refresh after newly host-created folders on macOS with OrbStack
   2.2.3. Create folders before startup or save and pause editing, then restart the affected service.

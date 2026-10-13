@@ -4,7 +4,6 @@
 services:
   viewer:
     image: ${SBD_IMAGE:?Set SBD_IMAGE to a full published image reference}
-    platform: linux/amd64
     pull_policy: missing
     init: true
     user: '${SBD_UID:-1000}:${SBD_GID:-1000}'

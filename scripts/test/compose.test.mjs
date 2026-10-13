@@ -47,14 +47,14 @@ test('standalone developer file builds native source with three local developmen
   assert.doesNotMatch(developer, /platform:|SBD_IMAGE/);
 });
 
-test('standalone consumer file selects an AMD64 image with three portable relative binds', () => {
+test('standalone consumer file selects a host-native image with three portable relative binds', () => {
   standalone(consumer, '', 4400);
   assert.match(
     consumer,
     /image: \$\{SBD_IMAGE:\?Set SBD_IMAGE to a full published image reference\}/,
   );
-  assert.match(consumer, /    platform: linux\/amd64\n    pull_policy: missing/);
-  assert.doesNotMatch(consumer, /^\s*(build|context|dockerfile):/m);
+  assert.match(consumer, /    pull_policy: missing/);
+  assert.doesNotMatch(consumer, /^\s*(platform|build|context|dockerfile):/m);
 });
 
 test(
@@ -70,7 +70,7 @@ test(
       if (key.startsWith('COMPOSE_') || key.startsWith('SBD_')) delete env[key];
     }
     // A selected mock digest is configuration data only. This test never pulls or starts it.
-    const image = `ghcr.io/en-ver/storyboard-viewer@sha256:${'a'.repeat(64)}`;
+    const image = `ghcr.io/example-owner/example-repository@sha256:${'a'.repeat(64)}`;
     function config(cwd, file, selectedImage) {
       return JSON.parse(
         execFileSync(
@@ -145,7 +145,7 @@ test(
       for (const p of ['storyboard.sbd', 'config', 'tmp']) mkdirSync(join(root, p));
       const used = runtime(config(root, undefined, image), root, '', 4400);
       assert.equal(used.image, image);
-      assert.equal(used.platform, 'linux/amd64');
+      assert.equal(used.platform, undefined);
       assert.equal(used.pull_policy, 'missing');
       assert.equal(used.build, undefined);
     } finally {

@@ -51,6 +51,7 @@ test('publication uses bounded branch/full-SHA tags and the pinned default-branc
     [...workflow.matchAll(/^        uses: (\S+)/gm)].map((m) => m[1]),
     [
       'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+      'docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1',
       'docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069',
       'docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302',
       'docker/login-action@dbcb813823bdd20940b903addbd779551569679f',
@@ -58,6 +59,22 @@ test('publication uses bounded branch/full-SHA tags and the pinned default-branc
     ],
   );
   const steps = workflow.split(/^      - name: /m).slice(1);
+  assert.deepEqual(
+    steps.map((s) => s.split('\n')[0]),
+    [
+      'Check out the event commit',
+      'Generate bounded branch tag',
+      'Set up ARM64 emulation',
+      'Set up Buildx',
+      'Generate image metadata',
+      'Log in to GHCR',
+      'Build and publish',
+    ],
+  );
+  assert.match(
+    steps[2],
+    /        uses: docker\/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4\.4\.0\n        with:\n          image: docker.io\/tonistiigi\/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0\n          platforms: arm64\n          cache-image: false/,
+  );
   const step = (id) => {
     const matches = steps.filter((s) => s.includes(`\n        id: ${id}\n`));
     assert.equal(matches.length, 1);
@@ -100,11 +117,11 @@ test('publication uses bounded branch/full-SHA tags and the pinned default-branc
     ],
   );
   assert.match(
-    steps[4],
+    steps[5],
     /          registry: ghcr.io\n          username: \$\{\{ github.actor \}\}\n          password: \$\{\{ secrets.GITHUB_TOKEN \}\}/,
   );
   assert.match(
-    steps[5],
-    /          builder: \$\{\{ steps.buildx.outputs.name \}\}\n          context: \.\n          file: \.\/Dockerfile\n          platforms: linux\/amd64\n          push: true\n          tags: \$\{\{ steps.meta.outputs.tags \}\}\n          labels: \$\{\{ steps.meta.outputs.labels \}\}/,
+    steps[6],
+    /          builder: \$\{\{ steps.buildx.outputs.name \}\}\n          context: \.\n          file: \.\/Dockerfile\n          platforms: linux\/amd64,linux\/arm64\n          outputs: type=image,oci-mediatypes=true\n          push: true\n          tags: \$\{\{ steps.meta.outputs.tags \}\}\n          labels: \$\{\{ steps.meta.outputs.labels \}\}/,
   );
 });

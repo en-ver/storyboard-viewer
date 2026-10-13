@@ -219,15 +219,32 @@ Use equivalent relative production-owned state paths if needed. All three bindin
 Make sure that the selected canonical unpacked storyboard already exists and is valid.
 Do not use a packed `.sbd` file for this binding.
 
-Select a full published image reference, preferably its immutable digest. The consumer file
-requires `SBD_IMAGE`, uses `platform: linux/amd64`, and has no build, base-file, or environment-file dependency.
-AMD64 images need working AMD64 emulation on ARM64 hosts. Establish that capability before deployment.
+Select a full published image reference, preferably the immutable root digest of its OCI image index.
+An image index groups images for different platforms under one reference.
+The consumer file requires `SBD_IMAGE` and has no forced platform, build, base-file, or environment-file dependency.
+Docker selects the matching Linux image for its server architecture, not the macOS/Darwin host label.
+
+Before deployment, read the selected image's registry metadata and the Docker server's architecture:
+
+```sh
+docker info --format '{{.OSType}}/{{.Architecture}}'
+docker buildx imagetools inspect 'ghcr.io/<owner>/<repository>@sha256:<digest>'
+```
+
+Use lowercase owner and repository names. Linux `x86_64`/`amd64` matches `linux/amd64`.
+Linux `aarch64`/`arm64` matches `linux/arm64`, including the ARM64/v8 variant.
+Make sure that the index contains a matching runnable image and both variants identify the same source commit.
+If the architecture or matching image is unsupported or uncertain, stop before deployment.
+Prefer one root index digest, not a platform-specific child digest.
+
+Apple Silicon uses the ARM64 image natively. Ordinary deployment needs no AMD64 emulation or `platform` override.
+An intentional foreign-platform override requires separate authorization and working emulation before startup.
 These instructions do not install an emulator.
 
 From the deployment directory, set your selected reference and a unique project name:
 
 ```sh
-export SBD_IMAGE='ghcr.io/<lowercase-owner>/<lowercase-repository>@sha256:<published-digest>'
+export SBD_IMAGE='ghcr.io/<owner>/<repository>@sha256:<digest>'
 export SBD_PROJECT=storyboard-my-production
 export SBD_PORT=4400
 docker compose --project-name "$SBD_PROJECT" config
@@ -249,12 +266,21 @@ and add only specifically needed read-only mounts.
 
 ### Published images (GHCR)
 
-The `Publish Docker image` workflow builds the existing Dockerfile for `linux/amd64` and
-publishes to GitHub Container Registry (GHCR). The image name comes from the executing
-repository's owner and name, not a fixed upstream namespace.
+The `Publish Docker image` workflow targets `linux/amd64` and `linux/arm64` in one OCI image index
+on GitHub Container Registry (GHCR). Both variants use the same checked-out source commit.
+The image name comes from the executing repository's owner and name, not a fixed upstream namespace.
 `Owner/Repository` becomes `ghcr.io/owner/repository`.
 OCI labels identify that repository and the exact source revision.
-AMD64 publication does not establish native ARM64 support. Native source development is separate.
+Generic references are `ghcr.io/<owner>/<repository>:<tag>` or `ghcr.io/<owner>/<repository>@sha256:<digest>`.
+Make sure that the selected publication contains both runnable platforms before deployment.
+Workflow configuration alone does not prove successful builds or runtime support.
+
+Before Buildx, the workflow installs ARM64 emulation through pinned QEMU setup and a pinned binfmt installer image.
+The installer runs privileged containers only on the ephemeral GitHub-hosted runner.
+It does not install QEMU or change binfmt on your computer.
+Both unchanged Dockerfile stages select each target platform, with the pinned Node 24 base indexes.
+Each platform installs its own frozen dependencies and runs the existing dependency-graph, packaging, and license checks.
+Dependencies are not copied between architectures. Native source development remains separate.
 
 Every trusted branch push can publish and consume GitHub Actions runner time, including
 pushes in a fork. Pull requests, tag events, and branch-deletion pushes do not publish.
@@ -271,7 +297,7 @@ Only the current default branch also gets `latest`, through the case-sensitive
 There are no package-version or release tags.
 Branch and SHA tags are mutable names. A digest identifies fixed image content.
 
-Private pulls require an account with package-read access. Establish authentication separately
+Public images permit anonymous pulls. Private pulls require an account with package-read access. Establish authentication separately
 before pulling. The publishing job's `GITHUB_TOKEN` does not authenticate your local Docker client.
 Fork owners can need to enable Actions. Organization policy or existing-package permissions
 can block publication. New packages default to private.
