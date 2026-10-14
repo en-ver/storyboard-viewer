@@ -42,6 +42,60 @@ export function files(root) {
   return result;
 }
 
+// Original tracked example corpus at this revision. Application revision labels are separate.
+export const EXAMPLE_SOURCE_REVISION = '9f1f6025d9307ae5ca63654f895a69cb0f04c9ac';
+export const EXAMPLE_NAMES = [
+  'cat-crimes.sbd',
+  'fernlight-launch.sbd',
+  'midnight-snack.sbd',
+  'minimal.sbd',
+  'pips-kite.sbd',
+  'salt-and-light.sbd',
+];
+export const EXAMPLE_INVENTORY_SHA256 =
+  '3491eb04fb5786ddb6cb2da966e32152f8735cffe88d01598142f41bc1065660';
+
+export function exampleInventory(source) {
+  const root = join(source, 'examples');
+  assert.deepEqual(readdirSync(root).toSorted(), ['README.md', ...EXAMPLE_NAMES]);
+  const digests = files(root);
+  const inventory = Object.keys(digests)
+    .toSorted()
+    .map((path) => ({
+      path,
+      size: readFileSync(join(root, path)).length,
+      sha256: digests[path],
+    }));
+  assert.equal(inventory.length, 168, 'Original example file count changed');
+  assert.equal(
+    inventory.reduce((sum, file) => sum + file.size, 0),
+    6_413_709,
+  );
+  const digest = createHash('sha256')
+    .update(inventory.map((file) => `${file.path}\0${file.size}\0${file.sha256}\n`).join(''))
+    .digest('hex');
+  assert.equal(digest, EXAMPLE_INVENTORY_SHA256, 'Original example corpus changed');
+  assert.equal(
+    hash(join(source, 'LICENSE')),
+    'f5f3b63944ab2074ea261d542ae29d538ccb5ddefe7e6e1fe51784560420d5e1',
+    'Original MIT notice changed',
+  );
+  return inventory;
+}
+
+export function copyExamples(source, parent) {
+  exampleInventory(source);
+  const dest = join(parent, 'examples');
+  cpSync(join(source, 'examples'), dest, { recursive: true });
+  copyFileSync(join(source, 'LICENSE'), join(parent, 'LICENSE'));
+  copyFileSync(join(source, 'examples/README.md'), join(parent, 'EXAMPLES-README.md'));
+  assert.deepEqual(files(dest), files(join(source, 'examples')), 'Example copy is incomplete');
+  assert.equal(hash(join(parent, 'LICENSE')), hash(join(source, 'LICENSE')));
+  assert.equal(hash(join(parent, 'EXAMPLES-README.md')), hash(join(dest, 'README.md')));
+  // Keep the original README's ../LICENSE link valid for the server's copy operation.
+  assert(readFileSync(join(dest, 'README.md'), 'utf8').includes('../LICENSE'));
+}
+
 export function dependencyGraph(report) {
   assert.equal(report.length, 1, 'Expected one CLI dependency report');
   const edges = new Set();
@@ -608,7 +662,7 @@ export function checkPackage(source, deployed, sourceReport) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [source, deployed, before] = process.argv.slice(2);
+  const [source, deployed, before, examplesParent] = process.argv.slice(2);
   if (source === '--browser-notices') {
     await prepareBrowserNotices(deployed);
   } else if (source === '--metadata') {
@@ -616,8 +670,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     writeFileSync(join(deployed, 'package.json'), JSON.stringify(metadataManifest(json(before))));
   } else {
     checkPackage(source, deployed, json(before));
+    assert(examplesParent, 'Missing image example destination');
+    copyExamples(source, examplesParent);
     console.log(
-      'Image package verified: compiled outputs, web assets, locked production graph, links and licenses',
+      'Image package verified: compiled outputs, web assets, locked production graph, links, licenses and original examples',
     );
   }
 }

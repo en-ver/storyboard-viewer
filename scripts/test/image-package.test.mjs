@@ -7,10 +7,12 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
 import {
@@ -18,6 +20,11 @@ import {
   checkPackage,
   copyBrowserNotices,
   dependencyGraph,
+  copyExamples,
+  exampleInventory,
+  EXAMPLE_NAMES,
+  EXAMPLE_SOURCE_REVISION,
+  files,
   installedGraph,
   metadataManifest,
 } from '../check-image-package.mjs';
@@ -117,6 +124,36 @@ function fixture(t) {
     check: () => checkPackage(source, deployed, report),
   };
 }
+
+test('packages all six original examples and original rights bytes', (t) => {
+  const source = fileURLToPath(new URL('../../', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'sbd-image-examples-'));
+  t.after(() => rmSync(root, { recursive: true }));
+  const inventory = exampleInventory(source);
+  assert.equal(inventory.length, 168);
+  copyExamples(source, root);
+  assert.deepEqual(files(join(root, 'examples')), files(join(source, 'examples')));
+  for (const file of inventory) {
+    assert.equal(statSync(join(root, 'examples', file.path)).size, file.size);
+    assert.deepEqual(
+      readFileSync(join(root, 'examples', file.path)),
+      readFileSync(join(source, 'examples', file.path)),
+    );
+  }
+  for (const name of EXAMPLE_NAMES) {
+    const original = JSON.parse(readFileSync(join(source, 'examples', name, 'ids.json'), 'utf8'));
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(root, 'examples', name, 'ids.json'), 'utf8')),
+      original,
+    );
+  }
+  assert.equal(EXAMPLE_SOURCE_REVISION, '9f1f6025d9307ae5ca63654f895a69cb0f04c9ac');
+  assert.deepEqual(readFileSync(join(root, 'LICENSE')), readFileSync(join(source, 'LICENSE')));
+  assert.deepEqual(
+    readFileSync(join(root, 'EXAMPLES-README.md')),
+    readFileSync(join(source, 'examples/README.md')),
+  );
+});
 
 test('accepts complete compiled output and internal pnpm links', (t) => {
   const f = fixture(t);

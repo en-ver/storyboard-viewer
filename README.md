@@ -141,41 +141,81 @@ image tool) into shots, arrange layers on the canvas and keep everything in orde
 
 ## Run with Docker
 
-Choose one standalone configuration. Source developers use the repository's
-`docker-compose.yml`. Consumers copy `docker-compose.template.yml` into their own
-deployment directory as `docker-compose.yml` and select a published image.
-The consumer file needs neither a source checkout nor a Dockerfile.
+Docker runs the app from a selected image. Consumers need Docker, Compose, and the verified
+`docker-compose.template.yml`. They do not need local Node.js, pnpm, a source checkout, or a Dockerfile.
+Source developers use the separate repository `docker-compose.yml`.
 
-Docker and Compose must be installed and running. Compose v5.1.2 is the verified support
-floor for these instructions. This does not establish that earlier versions cannot work.
-The viewer has no sign-in. Keep the port bound to `127.0.0.1`.
+These workspace features require an image published from this source revision or later.
+Older images use the single-storyboard command and do not support the new workspace flags.
+Do not migrate an existing deployment or change its image, bind, or port without separate approval.
 
-Each file starts exactly one `viewer`. Give every checkout, production, or task a unique
-`--project-name` and an unused host port. Use the same name, directory, and environment
-for subsequent commands. Do not combine the files or start the template from the source root.
+Docker and Compose must be installed and running. Compose v5.1.2 is the verified support floor.
+This does not establish that earlier versions cannot work. The viewer has no sign-in.
+Keep the host port bound to `127.0.0.1`.
+
+Each file starts one `viewer`. Give each task a unique `--project-name` and an unused host port.
+Use the same directory, name, and environment for later commands.
+Do not combine the developer and consumer files.
+
+### Projects and Examples
+
+The workspace shows two folders. Projects maps an existing production task folder to `/projects`.
+It can be empty. It needs no placeholder storyboard.
+Only immediate-child names ending in `.sbd` appear.
+
+Examples contains all six original examples under `/home/node/examples` in the image.
+This is the container's home directory, not your host home directory.
+Examples are read-only. Startup does not copy them into Projects.
+
+Unpacked Projects are writable. Packed Projects are read-only in workspace mode.
+The app does not unpack them automatically.
+File → Open another storyboard shows the workspace selector.
+Use New for a named project, Open for an existing project, or Copy to Projects for one example.
+
+Copy preserves original project bytes, titles, stable IDs, and media.
+It creates writable files and includes the original `LICENSE`, `EXAMPLES-README.md`, and a `SOURCE.md` record.
+The original example corpus comes from source commit `9f1f6025d9307ae5ca63654f895a69cb0f04c9ac`.
+That is example provenance, not the application image's revision.
+The original README remains at `/home/node/examples/README.md`.
+Its `../LICENSE` link resolves to `/home/node/LICENSE`.
+The image also carries `/home/node/EXAMPLES-README.md` with the same original bytes.
+
+Rename changes the filesystem basename, not the title in the storyboard.
+Save browser work and pause cooperating external writers before Rename.
+Independent MCP sessions must reopen the renamed path.
+The app updates affected shared history. There is no cross-process lock.
+If `SBD_NAME` pins the old basename, edit that value before restarting.
+
+### Startup selection
+
+With no command arguments, the image wrapper starts:
+
+```sh
+sbd serve --workspace /projects --examples /home/node/examples --host 0.0.0.0 --port 4400
+```
+
+A nonempty `SBD_NAME` adds `--default-project "$SBD_NAME"`.
+Use an exact immediate-child Projects basename, such as `my-film.sbd`, not a title or path.
+This explicit selection always wins. A missing or invalid explicit project stops startup.
+
+Without `SBD_NAME`, startup opens the newest allowed, valid project in shared history.
+If none exists, it opens Midnight Snack read-only.
+`SBD_PROJECT` identifies the Compose deployment. It does not select a storyboard.
 
 ### Source development
 
-Run these commands from the intended checkout root. The developer file builds the root
-Dockerfile for the Docker engine's native architecture. It uses `storyboard-viewer:dev`
-and `pull_policy: build`. If that tag belongs to another task, stop before replacing it.
-The default host port is 4410. No published image or AMD64 emulation is needed.
+Run these commands from the intended source checkout.
+The developer file builds the root Dockerfile for the Docker engine's native architecture.
+It uses `storyboard-viewer:dev` and `pull_policy: build`.
+If another task owns that tag, stop before replacing it.
+The default host port is 4410. No published image or AMD64 emulation is required.
 
-Prepare an existing valid unpacked storyboard at `.dev/storyboard.sbd`, plus existing
-`.dev/config` and `.dev/tmp` directories. These are ignored local development inputs.
-Do not mount repository examples or production originals for a trial. Copy only an input
-that you are authorized to edit.
-
-For a deliberately empty disposable fixture, use the built CLI's `new` command.
-First install the frozen dependencies and build with the repository's pinned pnpm 8.15.6.
-Check permissions using the guidance below before startup. Then run:
+Prepare the three private development directories.
+Do not mount production originals or your home directory for a trial.
+The image supplies Examples, so the Projects directory can start empty.
 
 ```sh
-npx -y pnpm@8.15.6 install --frozen-lockfile
-npx -y pnpm@8.15.6 build
-mkdir -p .dev/config .dev/tmp
-node packages/cli/dist/cli.js new .dev/storyboard.sbd --preset blank --title "Docker trial"
-node packages/cli/dist/cli.js validate .dev/storyboard.sbd
+mkdir -p .dev/projects .dev/config .dev/tmp
 export SBD_PROJECT=storyboard-dev-my-task
 export SBD_PORT=4410
 docker compose --project-name "$SBD_PROJECT" config
@@ -183,86 +223,133 @@ docker compose --project-name "$SBD_PROJECT" up -d --build
 docker compose --project-name "$SBD_PROJECT" ps
 ```
 
-Plain `docker compose` discovers
-`docker-compose.yml`. An explicit `--file docker-compose.yml` selects the same file.
-Remove or resolve conflicting local Compose files or selection variables before using automatic discovery.
+Plain `docker compose` discovers `docker-compose.yml`.
+An explicit `--file docker-compose.yml` selects the same file.
+Resolve conflicting local Compose files or selection variables before automatic discovery.
 Open `http://localhost:4410/`, or the host port you selected.
 
-Docker installs dependencies and builds the app into the image, not at container startup.
-The runtime has no browser or ffmpeg executable. CLI PDF export is not included.
-Ordinary `pnpm test` checks both files without Docker. To opt in to structured Compose
-configuration checks, run `SBD_COMPOSE_TESTS=1 node --test scripts/test/compose.test.mjs`.
-This check does not build, pull, or start an image. The existing packaging baseline runs
-separately through `pnpm test:image`.
+Docker builds the app into the image. Startup does not compile, install dependencies, or run hot reload.
+The runtime contains no browser, ffmpeg, or ffprobe executable.
+CLI PDF export needs a separately installed browser and is not available in this image.
 
 ### Consumer deployment
 
-Use an existing production or task directory. Obtain the template from the reviewed repository
-revision you intend to use, then copy it there as `docker-compose.yml`.
-No source clone is required if you already have the verified template.
-Keep the production's canonical unpacked `.sbd` in its existing semantic location.
-The default `./storyboard.sbd` binding is an example, not a required production layout.
-If the canonical folder is elsewhere inside that production, change only its relative bind source.
+Use an existing production or task directory.
+Obtain the template from the reviewed source revision that matches your selected image.
+If `docker-compose.yml` already exists, stop and review it before any separately authorized replacement.
 
-If `docker-compose.yml` already exists, stop before copying. Review that file and authorize
-any replacement separately. From your chosen deployment directory, copy the verified template
-and prepare its private state directories:
+From the deployment directory, copy the verified template and prepare private state directories:
 
 ```sh
-TEMPLATE='/path/to/verified/docker-compose.template.yml'
+TEMPLATE='/absolute/path/to/verified/docker-compose.template.yml'
 test ! -e docker-compose.yml && test ! -L docker-compose.yml && cp "$TEMPLATE" ./docker-compose.yml
 mkdir -p config tmp
 ```
 
-Use equivalent relative production-owned state paths if needed. All three bindings use
-`create_host_path: false`. Docker does not create missing input directories.
-Make sure that the selected canonical unpacked storyboard already exists and is valid.
-Do not use a packed `.sbd` file for this binding.
+The template uses `./projects:/projects`, `./config:/config`, and `./tmp:/tmp`.
+Set the Projects bind source to your existing production task folder.
+Keep its canonical project files in their existing semantic location.
+Do not copy a production into an arbitrary staging folder to fit the template.
+All three directories must already exist because `create_host_path: false` prevents automatic creation.
 
-Select a full published image reference, preferably the immutable root digest of its OCI image index.
-An image index groups images for different platforms under one reference.
-The consumer file requires `SBD_IMAGE` and has no forced platform, build, base-file, or environment-file dependency.
-Docker selects the matching Linux image for its server architecture, not the macOS/Darwin host label.
+Select a full published image reference, preferably an immutable root digest of its OCI image index.
+An image index groups platform images under one reference.
+The consumer requires `SBD_IMAGE` and has no build, base-file, environment-file, or forced-platform dependency.
+Docker selects the Linux image for its server architecture, not the macOS host label.
 
-Before deployment, read the selected image's registry metadata and the Docker server's architecture:
+Before deployment, read the selected registry metadata and Docker server architecture:
 
 ```sh
 docker info --format '{{.OSType}}/{{.Architecture}}'
 docker buildx imagetools inspect 'ghcr.io/<owner>/<repository>@sha256:<digest>'
 ```
 
-Use lowercase owner and repository names. Linux `x86_64`/`amd64` matches `linux/amd64`.
-Linux `aarch64`/`arm64` matches `linux/arm64`, including the ARM64/v8 variant.
-Make sure that the index contains a matching runnable image and both variants identify the same source commit.
-If the architecture or matching image is unsupported or uncertain, stop before deployment.
-Prefer one root index digest, not a platform-specific child digest.
+Use lowercase owner and repository names.
+Linux `x86_64`/`amd64` matches `linux/amd64`.
+Linux `aarch64`/`arm64` matches `linux/arm64`, including ARM64/v8.
+Make sure that both runnable variants identify the same source commit.
+If the matching architecture is absent or uncertain, stop before deployment.
 
-Apple Silicon uses the ARM64 image natively. Ordinary deployment needs no AMD64 emulation or `platform` override.
-An intentional foreign-platform override requires separate authorization and working emulation before startup.
-These instructions do not install an emulator.
+Apple Silicon uses ARM64 natively. Ordinary startup needs no platform override.
+A foreign-platform trial requires separate authorization and working emulation.
+With a classic Docker image store, acquiring another architecture can replace a root reference's local mapping.
+For that trial, select the verified child from the same index and inspect its architecture.
+Do not change the ordinary consumer's native root selection.
 
-From the deployment directory, set your selected reference and a unique project name:
+Set your reference and unique deployment identity:
 
 ```sh
 export SBD_IMAGE='ghcr.io/<owner>/<repository>@sha256:<digest>'
 export SBD_PROJECT=storyboard-my-production
 export SBD_PORT=4400
+# Optional. Omit this line to use shared history, then Midnight Snack.
+export SBD_NAME='my-film.sbd'
 docker compose --project-name "$SBD_PROJECT" config
 docker compose --project-name "$SBD_PROJECT" pull viewer
 docker compose --project-name "$SBD_PROJECT" up -d --no-build --pull never
 docker compose --project-name "$SBD_PROJECT" ps
 ```
 
-Replace the placeholders with the actual published identity. Make sure that the resolved paths,
-identity, and port match your production before starting. Open `http://localhost:4400/`,
-or the host port you selected. The template uses `pull_policy: missing` for ordinary startup.
-The explicit pull above obtains the chosen image before the no-pull startup.
+Make sure that resolved paths, nonzero identity, port, and optional basename match the intended task.
+Open `http://localhost:4400/`, or your selected host port.
+The explicit pull obtains the selected image before no-pull startup.
+The template's `pull_policy: missing` reuses a cached image. It does not refresh a mutable tag.
 
-Alternatively, replace the template's entire `image:` value with the selected literal reference.
-Then `SBD_IMAGE` is unnecessary. Never embed authentication tokens in YAML, an image reference,
-or retained environment files. Do not mount your home, repository metadata, credentials,
-or the Docker socket. Mount only intended inputs. Preserve relative linked-media paths,
-and add only specifically needed read-only mounts.
+You can replace the template's entire `image:` value with the selected literal reference.
+Then `SBD_IMAGE` is unnecessary.
+Do not place tokens in YAML, references, or retained environment files.
+Do not mount credentials, repository metadata, your home directory, or the Docker socket.
+Workspace linked files must stay inside their owning unpacked project.
+
+### One-shot Docker CLI
+
+The image entrypoint passes every explicit argument to `node /app/dist/cli.js`.
+It does not prepend workspace startup to a CLI command.
+Use this pattern without a local Node.js installation or source checkout.
+First acquire the verified immutable image under your deployment authority.
+
+Save browser work and pause browser, MCP, and other writers before commands that change project files.
+The CLI does not inherit the workspace server's read-only policy or filesystem guards.
+Do not use it to modify image Examples or packed production originals.
+Legacy packed edits can create an adjacent `.bak` file.
+Scope mounts and write permission to inputs and outputs you are authorized to use.
+
+```sh
+TASK_PARENT='/absolute/path/to/existing/production/task'
+CLI_TMP='/absolute/path/to/existing/private/temporary-directory'
+# TASK_PARENT contains my-film.sbd and authorized import inputs.
+# CLI_TMP provides writable disk-backed staging for packed inputs.
+SBD_IMAGE='ghcr.io/<owner>/<repository>@sha256:<digest>'
+sbd_docker() {
+  docker run --rm --pull=never --init --network none \
+    --user "${SBD_UID:-1000}:${SBD_GID:-1000}" --read-only \
+    --cap-drop ALL --security-opt no-new-privileges:true \
+    --mount "type=bind,source=$TASK_PARENT,target=/projects" \
+    --mount "type=bind,source=$CLI_TMP,target=/tmp" --env HOME=/tmp \
+    "$SBD_IMAGE" "$@"
+}
+sbd_docker --help
+sbd_docker --version
+sbd_docker new /projects/new-film.sbd --preset film --title "New Film"
+sbd_docker validate /projects/my-film.sbd --json
+sbd_docker export-fountain /projects/my-film.sbd -o /projects/script.fountain
+sbd_docker import-fountain /projects/script.fountain -o /projects/imported.sbd --preset film
+sbd_docker import-storyboarder /projects/scene.storyboarder -o /projects/storyboarder.sbd
+sbd_docker pack /projects/my-film.sbd -o /projects/shared.sbd
+sbd_docker unpack /projects/shared.sbd -o /projects/unpacked.sbd
+sbd_docker clean /projects/my-film.sbd
+```
+
+Choose output names that do not overwrite retained files.
+Storyboarder import reads the adjacent `images/` folder and board audio.
+There are no `info`, image-import, audio-import, or CSV-import CLI commands.
+Use the project API or MCP read tools for model inspection.
+Use the app or authorized MCP asset tools to add local images and audio.
+`clean` only lists unused media unless you separately authorize deletion with `--yes`.
+These local operations do not authorize AI generation, uploads to providers, spending, or a general asset catalog.
+
+The CLI exposes `export-pdf`, but this browser-free image cannot execute it successfully.
+A browser installation needs separate authority. Use the app's PDF export or an authorized host installation instead.
 
 ### Published images (GHCR)
 
@@ -325,10 +412,16 @@ from OrbStack results.
 The container root is read-only. The image remains build-once, with immutable application
 files under `/app`. The three writable binds have separate purposes:
 
-- `/storyboard.sbd` stores browser and MCP edits in the host storyboard.
-- `/config/recent.json` stores the shared recent list, through `SBD_CONFIG_DIR=/config`.
+- `/projects` stores server-backed Projects and their edits in the existing host task folder.
+- `/config/recent.json` stores up to 10 shared records, through `SBD_CONFIG_DIR=/config`.
+  This existing version-1 schema supplies restart selection. Successful Open precedes history writes.
+  History errors produce a warning, not a false claim that persistence succeeded.
 - `/tmp` provides disk-backed upload staging and `HOME=/tmp`. Viewer discovery uses
   `/tmp/storyboard-viewer/serve-<path-hash>.json`, not `/config`.
+
+The browser's local recent list shows at most five entries.
+Its IndexedDB and localStorage belong to that browser origin, not the Docker configuration bind.
+Changing the host port changes the browser origin. Theme and browser-local files do not move into `/config`.
 
 Keep adequate disk space for media staging. These binds survive container recreation.
 The files in the temporary bind are runtime state, not production deliverables.
@@ -362,12 +455,17 @@ Do not remove input, configuration, or temporary directories as part of containe
 An MCP client can use standard input/output through the running service:
 
 ```sh
-docker compose --project-name "$SBD_PROJECT" exec -T viewer node /app/dist/cli.js mcp /storyboard.sbd
+docker compose --project-name "$SBD_PROJECT" exec -T viewer node /app/dist/cli.js mcp '/projects/my-film.sbd'
 ```
 
 Do not add `--serve`: the service already runs the viewer.
 This is not a network MCP endpoint or automatic agent registration.
+The MCP process opens that actual path, independently of the browser's selected project.
+An unbound `mcp` process can also use `open_storyboard` with `/projects/<name>.sbd`.
+There is no `--project` option.
 Container discovery URLs are not host viewer URLs.
+Use the real browser origin and the selected project's scoped `/p/<token>/` path.
+Do not guess a host port or expose the container's internal discovery origin to the user.
 
 ### Host folder changes and live refresh
 
@@ -398,9 +496,47 @@ See the [Node.js filesystem caveats](https://nodejs.org/docs/latest-v24.x/api/fs
 and the [OrbStack 2.2.3 report](https://github.com/orbstack/orbstack/issues/2561#issuecomment-5403565713).
 Node.js warns about Docker and other virtualization, so this risk is not necessarily exclusive to OrbStack.
 
+### Maintainer packaging checks
+
+Ordinary `pnpm test` checks the source package, wrapper syntax, admitted example corpus, and both Compose files.
+It does not require Docker. The opt-in runtime/build test stays skipped.
+Static checks do not prove that a built image starts.
+
+Resolve Compose configuration without a build, pull, or container startup:
+
+```sh
+SBD_COMPOSE_TESTS=1 node --test scripts/test/compose.test.mjs
+```
+
+For delivery, validate source locally, then let the existing GitHub publisher build the reviewed commit.
+Do not substitute an unreviewed image or a local rebuild for the published artifact.
+After acquiring and verifying its immutable reference and labels, use prebuilt mode:
+
+```sh
+SBD_DOCKER_TESTS=1 \
+SBD_TEST_IMAGE='ghcr.io/<owner>/<repository>@sha256:<digest>' \
+SBD_TEST_REVISION='<full-reviewed-40-character-commit>' \
+node --test scripts/test/image-build.test.mjs
+```
+
+`SBD_TEST_IMAGE` selects an already-acquired immutable root or verified child.
+`SBD_TEST_REVISION` states the expected application commit, not the older example provenance.
+The test inspects source/revision labels, image configuration, Linux architecture, packages, licenses, and all original example bytes.
+It also checks CLI passthrough and normal wrapper startup.
+Prebuilt mode never builds, acquires, retags, prunes, or falls back to a local build.
+It records owned container IDs and removes only those exited containers.
+Native ARM64 acceptance uses the root without a forced platform.
+A separately authorized AMD64 trial uses the verified child from that index.
+
+The existing `pnpm test:image` without these parameters remains a manual local-build test.
+It includes deliberate lockfile, compiler, output, and host-output injection checks.
+Those build-dependent cases are not run during GitHub-only delivery.
+Published-image runtime checks remain deferred until publication.
+No disabled runtime test constitutes a passed runtime check.
+
 ## Example storyboards
 
-Five ready-made storyboards with pictures, voices, music and sound effects live in
+Six example storyboards, including a minimal fixture, live in
 [`examples/`](examples/README.md). Two of them are under **Try an example** in the
 [browser app][app].
 
@@ -408,13 +544,14 @@ Five ready-made storyboards with pictures, voices, music and sound effects live 
   <img src="docs/images/animatic.gif" alt="Animatic of the Pip's Kite example: a little robot tries to fly a kite while an owl gives advice, with captions" width="640" />
 </p>
 
-| Example                                                       | Kind                         |
-| ------------------------------------------------------------- | ---------------------------- |
-| [Midnight Snack Protocol](examples/midnight-snack.sbd)        | Comedy short                 |
-| [Salt & Light](examples/salt-and-light.sbd)                   | Documentary                  |
-| [Rating My Cat's 3 A.M. Crimes](examples/cat-crimes.sbd)      | TikTok / Reels / Shorts      |
-| [Fernlight Halo — Launch Film](examples/fernlight-launch.sbd) | Motion design / brand launch |
-| [Pip's Kite](examples/pips-kite.sbd)                          | Animation                    |
+| Example                                                       | Kind                           |
+| ------------------------------------------------------------- | ------------------------------ |
+| [Minimal fixture](examples/minimal.sbd)                       | Format and media demonstration |
+| [Midnight Snack Protocol](examples/midnight-snack.sbd)        | Comedy short                   |
+| [Salt & Light](examples/salt-and-light.sbd)                   | Documentary                    |
+| [Rating My Cat's 3 A.M. Crimes](examples/cat-crimes.sbd)      | TikTok / Reels / Shorts        |
+| [Fernlight Halo — Launch Film](examples/fernlight-launch.sbd) | Motion design / brand launch   |
+| [Pip's Kite](examples/pips-kite.sbd)                          | Animation                      |
 
 Everything in them is made up; all pictures and sounds were generated for this project.
 

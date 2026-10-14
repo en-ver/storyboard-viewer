@@ -15,6 +15,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json LICENSE 
 COPY packages/ ./packages/
 COPY apps/web/ ./apps/web/
 COPY scripts/check-image-package.mjs ./scripts/check-image-package.mjs
+COPY examples/ ./examples/
 RUN sha256sum pnpm-lock.yaml > /tmp/source-lock.sha256 \
     && pnpm install --frozen-lockfile \
     && node scripts/check-image-package.mjs --browser-notices /src
@@ -28,17 +29,21 @@ RUN SBD_IMAGE_LICENSES=1 pnpm build \
     && pnpm --filter @storyboard-viewer/cli list --prod --depth Infinity --json > /tmp/source-deps.json \
     && pnpm --filter @storyboard-viewer/cli --prod --offline deploy /out/cli \
     && sha256sum --check /tmp/source-lock.sha256 \
-    && node scripts/check-image-package.mjs /src /out/cli /tmp/source-deps.json
+    && node scripts/check-image-package.mjs /src /out/cli /tmp/source-deps.json /out/home
 
 FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS runtime
 ENV NODE_ENV=production SBD_CONFIG_DIR=/config
 WORKDIR /app
 COPY --from=builder /out/cli/ ./
+COPY --from=builder /out/home/ /home/node/
+COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
 # Only state directories are writable. Never change ownership of host bind mounts.
-RUN chmod -R a-w /app \
-    && mkdir /config /storyboard.sbd \
-    && chown node:node /config /storyboard.sbd
+RUN chmod -R a-w /app /home/node/examples /home/node/LICENSE /home/node/EXAMPLES-README.md \
+    && chmod 755 /app/docker-entrypoint.sh \
+    && mkdir /config /projects \
+    && chown node:node /config /projects
 USER node
 EXPOSE 4400
-ENTRYPOINT ["node", "/app/dist/cli.js"]
-CMD ["serve", "/storyboard.sbd", "--host", "0.0.0.0", "--port", "4400"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# Clear the Node base image's inherited CMD ["node"].
+CMD []

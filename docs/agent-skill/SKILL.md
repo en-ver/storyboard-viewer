@@ -9,6 +9,33 @@ You edit storyboards through the `storyboard` MCP server (tools such as `open_st
 `add_shot`, `add_asset`, `add_variant`, `add_cue`, `validate`, `get_viewer_url`). The user watches
 the result live in the viewer.
 
+## Authority and source selection
+
+Edit only the storyboard and local media that the user authorizes.
+This skill does not authorize deployment, installation, MCP client registration, AI generation, provider uploads, or spending.
+It does not authorize a general asset catalog or media pipeline.
+
+For a native server workspace, choose an actual writable unpacked Projects path.
+Docker uses `/projects/<name>.sbd` inside the container.
+Examples and packed Projects are read-only in workspace mode.
+Do not use independent MCP or CLI writes to bypass that policy.
+Use an explicitly authorized Copy to Projects or unpacked copy instead.
+Copy keeps original rights and source records.
+
+The MCP process has its own selected path. It does not follow the browser's current tab selection.
+An unbound stdio `mcp` process can open the actual path with `open_storyboard`.
+For an existing viewer, do not add `--serve` or invent a `--project` option.
+Read the [README](../../README.md#run-with-docker) for setup, stdio connection, and Docker CLI patterns.
+The README owns those commands. This skill owns storyboard editing boundaries.
+
+Use `get_viewer_url` for an existing viewer.
+For container discovery, use the real host browser origin and the selected scoped project path.
+Do not guess the host port or give the user an internal container URL.
+Before filesystem Rename, save browser work and pause cooperating external writers.
+Reopen the renamed path in independent MCP sessions.
+Physical Rename differs from narrative-title edits.
+If deployment configuration pins the old basename, the operator must update it before restart.
+
 ## Every time
 
 1. `open_storyboard` (use `create: true` and a `preset` for a new one: film, documentary,
@@ -39,6 +66,10 @@ the result live in the viewer.
 - **One voice-over split across lines:** `add_asset { path: "vo.mp3" }`, then for each line
   `add_cue { asset_id, line_id, in, out, track: "dialogue" }` (seconds inside the recording).
 - **Background music:** `add_cue { asset_id, global_start: 0, track: "music", gain: 0.4, loop: true }`.
-- **PDF:** run `node <repo>/packages/cli/dist/cli.js export-pdf <storyboard> -o board.pdf`.
+- **PDF:** use the installed CLI procedure in the [user guide](../GUIDE.md#the-sbd-command).
+  CLI export needs an installed browser. The Docker runtime contains none.
+  Do not install one without separate authority.
 
-The full guide is `AGENTS.md` in the Storyboard Viewer repository; the format is in `SPEC.md`.
+The full editing guide is [AGENTS.md](../../AGENTS.md). The format is in [SPEC.md](../../SPEC.md).
+For workspace browser behavior, read the [user guide](../GUIDE.md#server-workspace).
+Packed legacy writes create adjacent backups. Prefer an authorized unpacked copy for production edits.

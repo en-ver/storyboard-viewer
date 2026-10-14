@@ -9,11 +9,11 @@ services:
     pull_policy: build
     init: true
     user: '${SBD_UID:-1000}:${SBD_GID:-1000}'
-    command: ['serve', '/storyboard.sbd', '--host', '0.0.0.0', '--port', '4400']
     environment:
       NODE_ENV: production
       SBD_CONFIG_DIR: /config
       HOME: /tmp
+      SBD_NAME: '${SBD_NAME:-}'
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -23,8 +23,8 @@ services:
       - '127.0.0.1:${SBD_PORT:-4410}:4400'
     volumes:
       - type: bind
-        source: ./.dev/storyboard.sbd
-        target: /storyboard.sbd
+        source: ./.dev/projects
+        target: /projects
         bind:
           create_host_path: false
       - type: bind

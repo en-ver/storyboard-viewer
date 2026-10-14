@@ -31,6 +31,33 @@ with **Open .sbd file** (or dropped on the start screen) in Chrome or Edge saves
 same file, automatically. In Safari and Firefox, and for a new storyboard, **Save**
 (Cmd/Ctrl+S) asks where to save it (or downloads a copy in browsers that can't save in place).
 
+## Server workspace
+
+A workspace server shows Projects and Examples on one port.
+The Docker instructions and command patterns live in the [README](../README.md#run-with-docker).
+These features require a matching new image. Older single-storyboard deployments remain unchanged.
+
+Projects contains immediate-child `.sbd` entries from the configured task folder.
+Unpacked projects are writable. Packed projects and all Examples are read-only in workspace mode.
+The image supplies Examples from its own home directory, not your host home.
+Use Copy to Projects to create a writable example copy with its original rights and source record.
+
+File → Open another storyboard opens the server's workspace selector.
+New creates a named project in Projects. Open switches this tab to a scoped project URL.
+Other tabs retain their own project selections.
+Rename changes a project's folder name. It does not change its narrative title.
+Save work and pause cooperating external writers first.
+Reopen the new path in independent MCP sessions.
+If a deployment pins the old basename through `SBD_NAME`, update that value before restart.
+
+Browser Open folder and Open .sbd file use browser-selected storage.
+They do not change the server's configured Projects root.
+New in the workspace creates server-owned files, not a hidden browser-local storyboard.
+
+Without an explicit basename, startup tries allowed, valid shared history, then Midnight Snack read-only.
+An explicit `--default-project` always wins. A missing or invalid explicit project is an error.
+Startup does not copy examples or unpack packed Projects.
+
 ## The tabs and menus
 
 The viewer has three tabs. Press **1–3** to switch.
@@ -176,7 +203,7 @@ Dark/Light. Printed sheets are always black on white.
 
 ## Saving and opening
 
-**With your agent or `sbd serve`**, changes save automatically, into a folder or into a packed
+**With your agent or legacy `sbd serve <path>`**, changes save automatically, into a folder or into a packed
 `.sbd` file (it is re-packed safely: written to a temporary file first, then swapped in, and the
 version from before the first save is kept next to it as `story.sbd.bak`). If your agent changes something
 while you are editing, you see an "Updated by agent" notice and both sets of changes are kept; if
@@ -190,6 +217,14 @@ served storyboard, File → Open another storyboard gets you there. Storyboards 
 `SBD_CONFIG_DIR` to use another folder), so the list is the same whichever port you opened.
 Picking one opens it in its running viewer, or starts one on the next free port. The browser app
 keeps its own list in the browser.
+
+Shared `recent.json` retains at most 10 records in its existing version-1 schema.
+The start screen shows at most five recent entries.
+Docker persists shared history through `SBD_CONFIG_DIR=/config` and the existing `./config:/config` bind.
+IndexedDB and localStorage remain browser-origin storage. Docker does not persist them in that bind.
+Workspace history only opens valid immediate-child entries within Projects or Examples, on the same listener.
+A successful Open can report a history warning if persistence fails.
+Workspace read-only projects do not save in place, including packed Projects.
 
 ## Export and import
 
@@ -243,18 +278,32 @@ Canvas (with the frame focused):
 From the project folder, run `pnpm sbd <command>` (or `node packages/cli/dist/cli.js <command>`
 from anywhere). `pnpm sbd <command> --help` explains each one.
 
-| Command                                                 | What it does                                                                           |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `sbd new <path> --preset <preset>`                      | New storyboard folder (presets: film, documentary, animation, motion, vertical, blank) |
-| `sbd serve <path> [--open]`                             | Viewer on localhost with live refresh                                                  |
-| `sbd mcp [path] [--serve]`                              | MCP server for agents (stdio)                                                          |
-| `sbd validate <path>`                                   | Check a storyboard for problems                                                        |
-| `sbd export-pdf <path> [--layout grid\|rows] [--per 6]` | Storyboard sheets as a PDF (uses your installed Chrome or Edge)                        |
-| `sbd import-fountain <script.fountain>`                 | Storyboard from a Fountain script                                                      |
-| `sbd export-fountain <path>`                            | The script as plain Fountain                                                           |
-| `sbd import-storyboarder <scene.storyboarder>`          | Storyboard from a Storyboarder scene                                                   |
-| `sbd pack <folder>` / `sbd unpack <file.sbd>`           | Folder ⇄ single shareable file                                                         |
-| `sbd clean <folder> [--yes]`                            | List (or delete) media files nothing uses                                              |
+These are host commands for an installed CLI.
+Consumers without local Node.js or a source checkout use the
+[one-shot Docker CLI pattern](../README.md#one-shot-docker-cli).
+Pass the same command arguments after the selected image reference.
+Save and pause cooperating writers before filesystem changes.
+The independent CLI does not inherit workspace read-only restrictions.
+
+| Command                                                                                 | What it does                                                                           |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `sbd new <path> --preset <preset>`                                                      | New storyboard folder (presets: film, documentary, animation, motion, vertical, blank) |
+| `sbd serve <path> [--open]`                                                             | Viewer on localhost with live refresh                                                  |
+| `sbd serve --workspace <projects> --examples <examples> [--default-project <basename>]` | Native Projects and read-only Examples on one port                                     |
+| `sbd mcp [path] [--serve]`                                                              | MCP server for agents (stdio)                                                          |
+| `sbd validate <path>`                                                                   | Check a storyboard for problems                                                        |
+| `sbd export-pdf <path> [--layout grid\|rows] [--per 6]`                                 | Storyboard sheets as a PDF (uses your installed Chrome or Edge)                        |
+| `sbd import-fountain <script.fountain>`                                                 | Storyboard from a Fountain script                                                      |
+| `sbd export-fountain <path>`                                                            | The script as plain Fountain                                                           |
+| `sbd import-storyboarder <scene.storyboarder>`                                          | Storyboard from a Storyboarder scene                                                   |
+| `sbd pack <folder>` / `sbd unpack <file.sbd>`                                           | Folder ⇄ single shareable file                                                         |
+| `sbd clean <folder> [--yes]`                                                            | List (or delete) media files nothing uses                                              |
+
+CLI PDF export needs an installed browser. The Docker runtime contains none.
+Browser installation requires separate authority.
+There are no image, audio, or CSV import CLI commands.
+Use authorized local media in the app or through MCP asset tools.
+For full model inspection, use the scoped project API or MCP read tools, not an `info` command.
 
 The animatic video export is in the app only (File → Export animatic video): it uses the
 browser's built-in video encoder.
@@ -277,7 +326,15 @@ the absolute path of your copy):
 
 With `--serve` the MCP server also runs the viewer for whichever storyboard the agent opens, and
 the agent's `get_viewer_url` tool returns its link. You can also pass a storyboard path:
-`… cli.js mcp ~/Storyboards/my-film.sbd --serve`. To remove the connection later:
+`… cli.js mcp ~/Storyboards/my-film.sbd --serve`.
+For an existing Docker workspace viewer, use the README's stdio pattern without `--serve`.
+Open the actual `/projects/<name>.sbd` path. There is no `--project` option.
+A separate unbound `mcp` process can open that path through `open_storyboard`.
+Use the known host origin and selected scoped path for the viewer link.
+Container discovery URLs do not establish a reachable host URL.
+MCP client registration requires separate approval.
+
+To remove the connection later:
 `claude mcp remove storyboard --scope user` or `codex mcp remove storyboard`.
 
 ## Guided tours
@@ -293,9 +350,12 @@ to move, **Esc** to stop. If nothing is open, a tour opens the example storyboar
 ## More questions
 
 **Can I edit a packed `.sbd` file?**
-Yes. Under `sbd serve` (and through your agent) it is saved in place, with `story.sbd.bak` as a
+Yes, in legacy `sbd serve <path>` and independent MCP sessions it is saved in place, with `story.sbd.bak` as a
 safety copy of the version from before you started. In the browser app, Chrome and Edge save
 back into the file you opened; Safari and Firefox download a new copy on each Save.
+
+In native workspace mode, packed Projects and Examples are read-only.
+Do not use an independent agent or CLI process to bypass that policy on production originals.
 
 **Is it safe?**
 `sbd serve` only listens on your own computer (localhost) and refuses writes from other

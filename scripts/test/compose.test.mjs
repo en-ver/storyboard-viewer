@@ -21,10 +21,8 @@ function standalone(text, prefix, port) {
   );
   assert.match(text, /    init: true\n/);
   assert.match(text, /    user: '\$\{SBD_UID:-1000\}:\$\{SBD_GID:-1000\}'/);
-  assert.match(
-    text,
-    /command: \['serve', '\/storyboard.sbd', '--host', '0.0.0.0', '--port', '4400'\]/,
-  );
+  assert.doesNotMatch(text, /^\s*(command|entrypoint):/m);
+  assert.match(text, /SBD_NAME: '\$\{SBD_NAME:-\}'/);
   assert.match(text, /SBD_CONFIG_DIR: \/config\n      HOME: \/tmp/);
   assert.match(text, /    read_only: true\n    cap_drop: \[ALL\]/);
   assert.match(text, /    security_opt: \[no-new-privileges:true\]/);
@@ -32,7 +30,7 @@ function standalone(text, prefix, port) {
   assert.ok(text.includes(`'127.0.0.1:\${SBD_PORT:-${port}}:4400'`));
   assert.deepEqual(
     [...text.matchAll(/        source: (.+)\n        target: (.+)/g)].map((m) => [m[1], m[2]]),
-    ['storyboard.sbd', 'config', 'tmp'].map((p) => [`./${prefix}${p}`, `/${p}`]),
+    ['projects', 'config', 'tmp'].map((p) => [`./${prefix}${p}`, `/${p}`]),
   );
   assert.equal([...text.matchAll(/      - type: bind/g)].length, 3);
   assert.equal([...text.matchAll(/          create_host_path: false/g)].length, 3);
@@ -107,25 +105,16 @@ test(
       assert.equal(v.stop_grace_period, '10s');
       assert.equal(v.environment.HOME, '/tmp');
       assert.equal(v.environment.SBD_CONFIG_DIR, '/config');
-      assert.deepEqual(v.command, [
-        'serve',
-        '/storyboard.sbd',
-        '--host',
-        '0.0.0.0',
-        '--port',
-        '4400',
-      ]);
+      // Compose can emit null for an inherited command or entrypoint.
+      assert.equal(v.command ?? undefined, undefined);
+      assert.equal(v.entrypoint ?? undefined, undefined);
+      assert.equal(v.environment.SBD_NAME, '');
       assert.equal(v.ports[0].host_ip, '127.0.0.1');
       assert.equal(v.ports[0].published, String(port));
       assert.equal(v.ports[0].target, 4400);
       assert.deepEqual(
         v.volumes.map((b) => [b.type, b.source, b.target, b.bind.create_host_path]),
-        ['storyboard.sbd', 'config', 'tmp'].map((p) => [
-          'bind',
-          resolve(dir, prefix, p),
-          `/${p}`,
-          false,
-        ]),
+        ['projects', 'config', 'tmp'].map((p) => ['bind', resolve(dir, prefix, p), `/${p}`, false]),
       );
       return v;
     }
@@ -142,7 +131,7 @@ test(
         join(repository, 'docker-compose.template.yml'),
         join(root, 'docker-compose.yml'),
       );
-      for (const p of ['storyboard.sbd', 'config', 'tmp']) mkdirSync(join(root, p));
+      for (const p of ['projects', 'config', 'tmp']) mkdirSync(join(root, p));
       const used = runtime(config(root, undefined, image), root, '', 4400);
       assert.equal(used.image, image);
       assert.equal(used.platform, undefined);

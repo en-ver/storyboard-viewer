@@ -1,33 +1,76 @@
 # Security
 
-Storyboard Viewer runs on your own computer. Nothing is uploaded and there are no accounts.
+Storyboard Viewer has no sign-in or network MCP endpoint.
+Local files stay local unless you explicitly use linked remote media or another external service.
+Browser media uploads go to the selected local server, not an AI provider.
 
-## What the local server does
+## Local HTTP server
 
-`sbd serve` and `sbd mcp --serve` start a small web server so your browser can show and edit a
-storyboard.
+`sbd serve` and `sbd mcp --serve` start an HTTP viewer.
+They listen on `127.0.0.1` by default.
+The Docker wrapper listens inside the container on `0.0.0.0`.
+Both Compose files publish only to host `127.0.0.1`.
+Do not expose this unauthenticated service to an untrusted network.
 
-- **Local only.** It listens on `127.0.0.1` (your own computer) by default. Other devices on your
-  network cannot reach it unless you pass `--host` yourself; don't do that on untrusted networks.
-- **Writes are guarded.** Saving, uploading media and linking files require a custom request
-  header (`x-sbd-client`) and a same-origin `Origin`. Browsers do not let other websites send that
-  header without permission the server never grants, so a web page you visit cannot change your
-  storyboards.
-- **Files it will serve.** Only files inside the storyboard folder, plus linked files (`file:`)
-  that the storyboard's `assets.json` actually lists. Paths with `..` or absolute paths are
-  refused.
-- **Edits are validated.** Changes that would add errors are rejected, and files are written
-  atomically (write to a temp file, then rename).
-- **Packed `.sbd` files are saved in place** when served: the new file is written next to the
-  old one and renamed over it, and the version from before the first save is kept as
-  `<file>.bak`.
+HTTP mutations require the `x-sbd-client` header. If `Origin` is present, its host and port must match `Host`; requests without `Origin` are allowed.
+The server does not grant cross-origin permission for that custom header.
+These guards block browser writes from other sites. They are not user authentication.
+Anyone with local process access and the necessary filesystem permissions can run independent tools.
 
-The MCP server talks to your agent over stdio (standard input/output), not over the network.
-Your agent can do whatever the MCP tools allow on the storyboard it opened, including copying
-files you point it to into the storyboard.
+Project edits are validated before saves.
+Atomic replacement writes a temporary file, then renames it.
+This protects a single write, not all cooperating processes from each other.
+
+## Workspace filesystem policy
+
+Native workspace mode pins separate existing Projects and Examples roots.
+Only supported immediate-child `.sbd` entries can be selected.
+Each loaded project has a scoped URL and a lifetime token.
+The token does not identify a user or grant general filesystem access.
+A retired token cannot select another project.
+
+Examples and packed Projects are read-only at the server API.
+The backend rejects model saves, media uploads, links, and file additions for those stores.
+The frontend hides or disables their mutation controls.
+This policy also applies without Docker. It is not only an image permission rule.
+
+Unpacked Projects remain writable within their owning directory.
+The server checks real paths, existing destination parents, root identity, and project identity.
+It rejects escaping symlinks and linked media outside the owning project.
+Legacy `serve <path>` retains its separate linked-file behavior.
+Do not assume that a legacy listener supplies workspace containment.
+
+Filesystem checks occur at points in time.
+They are not a kernel sandbox or cross-process lock.
+Save browser work and pause cooperating external writers before filesystem operations or Rename.
+Rename drains admitted server writes and retires the old route.
+Independent MCP sessions must reopen the renamed path.
+
+## Docker and independent CLI processes
+
+The runtime uses nonzero UID/GID, a read-only root filesystem, dropped capabilities, and no new privileges.
+Only the Projects, configuration, and temporary binds are writable.
+Startup does not change host ownership, permissions, or existing production layout.
+Do not mount credentials, your home directory, repository metadata, or the Docker socket.
+
+Image Examples and original license files are immutable.
+Copy to Projects preserves original bytes and rights while creating writable destination files.
+The example provenance revision is separate from the application's published revision.
+The template and CLI instructions are in the [README](README.md#run-with-docker).
+
+Independent CLI and MCP processes do not inherit a workspace store's access policy.
+They run with their own filesystem permissions and selected paths.
+Legacy packed edits write beside the original and keep a first-save `<file>.bak`.
+Do not use these processes to bypass read-only workspace policy on production originals.
+Use an explicitly authorized writable copy instead.
+
+MCP uses stdio, not a network endpoint.
+A viewer link discovered inside a container is not proof of a reachable host URL.
+Use the real host origin and selected project's scoped path.
+Client registration, remote services, browser installation, generation, credits, and bandwidth use need separate authority.
 
 ## Reporting a vulnerability
 
-Please report security problems privately (a GitHub security advisory on the repository, or the
-maintainers' contact on the repository profile) rather than in a public issue. Include steps to
-reproduce. We will reply as soon as we can and credit you in the fix if you like.
+Report vulnerabilities privately through a GitHub security advisory or the maintainer's profile contact.
+Include reproduction steps.
+Do not publish credentials or private project material in a report.

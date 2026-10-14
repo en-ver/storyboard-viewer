@@ -8,6 +8,12 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- Native Projects and read-only Examples on one listener, with scoped project URLs and independent tab selection.
+- Explicit New, Open, Rename, and Copy to Projects actions. Example copies retain original media, IDs, rights, and source records.
+- All six original examples in the image. The legacy two-example browser gallery remains unchanged.
+- Image wrapper with no-argument workspace startup and explicit CLI argument passthrough.
+- Prebuilt-image packaging tests for a verified immutable reference and expected source commit, without local rebuilding.
+
 - Repository-owned GHCR publication targets ARM64 and AMD64 in one OCI image index on branch pushes and manual dispatch.
   Branch and full-SHA tags, default-branch-only `latest`, and explicit image selection instructions remain unchanged.
 - Standalone `docker-compose.yml` for native source development and portable
@@ -18,6 +24,14 @@ All notable changes are listed here. The format follows
   Docker Desktop and native Linux refresh remain unverified. No polling fallback is included.
 
 ### Changed
+
+- Compose mounts an existing Projects task folder, configuration, and disk-backed temporary directory.
+  No placeholder storyboard or automatic example copy is required.
+- Startup uses an explicit project basename, then allowed valid shared history, then Midnight Snack read-only.
+  Missing explicit projects stop startup. Persistent `recent.json` retains its existing schema and 10-record limit.
+- Workspace server APIs enforce read-only packed Projects and Examples, with real-path containment for writable Projects.
+  Independent CLI and MCP processes retain their separate filesystem permissions.
+- Save and pause cooperating external writers before filesystem Rename. Reopen renamed paths in independent MCP sessions.
 
 - Retired `compose.base.yaml` and `compose.template.yaml`. Each deployment now uses one
   standalone file with one viewer and existing relative bind directories.
