@@ -2,23 +2,54 @@
   import { PRESETS, PRESET_IDS, type PresetId } from '@storyboard-viewer/format';
   import { canPickFolder } from '../lib/sources/local';
   import { app } from '../lib/state.svelte';
+  import { workspaceApi } from '../lib/workspace';
   import Dialog from './Dialog.svelte';
 
   let { open = $bindable(false) }: { open: boolean } = $props();
 
   let title = $state('My storyboard');
   let preset = $state<PresetId>('film');
+  let name = $state('');
+  let error = $state('');
+  $effect(() => {
+    if (open) {
+      preset = app.workspace ? 'blank' : 'film';
+      error = '';
+    }
+  });
   let busy = $state(false);
 
   const ORDER: PresetId[] = ['film', 'vertical', 'documentary', 'animation', 'motion', 'blank'];
-  const presets = $derived(ORDER.filter((id) => PRESET_IDS.includes(id)).map((id) => PRESETS[id]));
+  const presets = $derived(
+    ORDER.filter((id) => (app.workspace?.presets ?? PRESET_IDS).includes(id)).map(
+      (id) => PRESETS[id],
+    ),
+  );
 
   async function create(where: 'browser' | 'folder') {
     if (!title.trim() || busy) return;
-    if (app.dirty && !confirm('Close the current storyboard without saving your changes?')) return;
     busy = true;
+    error = '';
     try {
-      if (await app.createNew({ title: title.trim(), preset }, where)) open = false;
+      if (app.workspace) {
+        if (!name.trim()) {
+          error = 'Enter a project folder name.';
+          return;
+        }
+        if (
+          await app.workspaceAction(
+            () => workspaceApi.create(app.client, name.trim(), title.trim(), preset),
+            `Created in Projects: ${name.trim()}`,
+          )
+        )
+          open = false;
+        else error = app.workspaceError ?? '';
+      } else {
+        if (!(await app.finishBeforeSwitch())) return;
+        if (await app.createNew({ title: title.trim(), preset }, where)) open = false;
+      }
+    } catch (e) {
+      error = (e as Error).message;
     } finally {
       busy = false;
     }
@@ -32,6 +63,20 @@
   width={720}
   onsubmit={() => create('browser')}
 >
+  {#if app.workspace}
+    <label class="field"
+      >Project folder name<input
+        id="new-name"
+        bind:value={name}
+        required
+        placeholder="my-project.sbd"
+      /></label
+    >
+    <p class="muted note">
+      Saved in Projects on this server. Names end in .sbd. We add it if needed.
+    </p>
+  {/if}
+  {#if error}<p role="alert">{error}</p>{/if}
   <label class="field">
     Title
     <!-- svelte-ignore a11y_autofocus -->
@@ -53,7 +98,7 @@
       {/each}
     </div>
   </fieldset>
-  {#if app.source?.kind === 'server'}
+  {#if app.source?.kind === 'server' && !app.workspace}
     <p class="note warn" role="note">
       This opens the new storyboard in this tab, separate from the live <code>sbd serve</code>
       storyboard. To make one your agent can edit, ask your agent, or run
@@ -66,7 +111,7 @@
   </p>
   {#snippet footer()}
     <button type="button" class="btn" onclick={() => (open = false)}>Cancel</button>
-    {#if canPickFolder}
+    {#if canPickFolder && !app.workspace}
       <button
         type="button"
         class="btn"
@@ -76,7 +121,9 @@
         onclick={() => create('folder')}>Create in a folder…</button
       >
     {/if}
-    <button type="submit" class="btn primary" id="new-create" disabled={busy}>Create</button>
+    <button type="submit" class="btn primary" id="new-create" disabled={busy || app.workspaceBusy}
+      >{app.workspace ? 'Create in Projects' : 'Create'}</button
+    >
   {/snippet}
 </Dialog>
 

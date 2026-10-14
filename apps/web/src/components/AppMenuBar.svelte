@@ -9,6 +9,7 @@
   import { THEMES, theme } from '../lib/theme.svelte';
   import { MOD, sep, type BarMenu, type MenuItem } from '../lib/menu';
   import MenuBar from './MenuBar.svelte';
+  import WorkspaceSelector from './WorkspaceSelector.svelte';
   import { tour } from '../lib/tour.svelte';
   import { TOURS } from '../lib/tours';
 
@@ -53,7 +54,29 @@
   ]);
 
   const file = $derived<MenuItem[]>([
-    { label: 'New storyboard…', icon: 'plus', onSelect: () => (ui.newOpen = true) },
+    {
+      label: app.workspace ? 'New in Projects…' : 'New storyboard…',
+      icon: 'plus',
+      onSelect: () => (ui.newOpen = true),
+    },
+    ...(app.workspace
+      ? [
+          {
+            label: 'Open workspace storyboard…',
+            icon: 'folder' as const,
+            command: 'open-other',
+            onSelect: () => (app.workspaceOpen = true),
+          },
+          { label: 'Recent workspace storyboards…', onSelect: () => (app.workspaceOpen = true) },
+          {
+            label: 'Open browser-local file…',
+            onSelect: async () => {
+              if (await app.finishBeforeSwitch())
+                location.assign(`${location.pathname}?source=local`);
+            },
+          },
+        ]
+      : []),
     ...(app.saveMode !== 'none'
       ? [
           {
@@ -100,14 +123,17 @@
       onSelect: () => (ui.settingsOpen = true),
     },
     ...(onClose ? [{ label: 'Close storyboard', icon: 'close' as const, onSelect: onClose }] : []),
-    ...(app.source?.kind === 'server'
+    ...(app.source?.kind === 'server' && !app.workspace
       ? [
           {
             label: 'Open another storyboard…',
             icon: 'folder' as const,
             command: 'open-other',
             // the start screen (recent storyboards, files, folders) without leaving this server
-            onSelect: () => location.assign(`${location.pathname}?source=local`),
+            onSelect: async () => {
+              if (await app.finishBeforeSwitch())
+                location.assign(`${location.pathname}?source=local`);
+            },
           },
         ]
       : []),
@@ -315,3 +341,4 @@
 </script>
 
 <MenuBar {menus} />
+{#if app.workspace}<WorkspaceSelector />{/if}

@@ -74,6 +74,10 @@ export interface ProjectSource {
   readOnly: boolean;
   /** Human-readable location (path, file name). */
   location: string;
+  /** Server API prefix, without a trailing slash. */
+  url?: string;
+  /** Server-managed workspace capabilities from the project response. */
+  workspace?: { root: 'examples' | 'projects'; label: string };
   /** Folder sources: the directory handle (kept to reopen it from the recent list). */
   handle?: FileSystemDirectoryHandle;
   /** Packed files: the file handle it was opened from (Save writes back into it). */

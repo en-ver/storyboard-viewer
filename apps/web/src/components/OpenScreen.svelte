@@ -6,6 +6,7 @@
   import { canPickFolder } from '../lib/sources/local';
   import { servedBySbd } from '../lib/sources/server';
   import Icon from './Icon.svelte';
+  import WorkspaceSelector from './WorkspaceSelector.svelte';
 
   let { onNew }: { onNew: () => void } = $props();
 
@@ -52,6 +53,7 @@
 </script>
 
 <section class="open" aria-labelledby="open-title">
+  {#if app.workspace}<WorkspaceSelector inline />{/if}
   <div
     class="drop"
     class:dragging
@@ -64,7 +66,9 @@
     ondragleave={() => (dragging = false)}
     {ondrop}
   >
-    <h2 id="open-title">Open a storyboard</h2>
+    <h2 id="open-title">
+      {app.workspace ? 'Open a browser-local storyboard' : 'Open a storyboard'}
+    </h2>
     <p class="muted">Drop a <code>.sbd</code> file here, or choose one.</p>
     <div class="actions">
       <button
@@ -101,7 +105,7 @@
     {/if}
   </div>
 
-  {#if app.recents.length}
+  {#if app.recents.length && !app.workspace}
     <section class="recent" aria-labelledby="recent-title" id="recent-list">
       <header>
         <h3 id="recent-title">Recent</h3>
@@ -153,23 +157,24 @@
     </section>
   {/if}
 
-  <section class="examples" aria-labelledby="examples-title" id="examples">
-    <h3 id="examples-title">Try an example</h3>
-    <div class="example-list">
-      {#each EXAMPLES as e (e.file)}
-        <button
-          type="button"
-          class="btn"
-          data-example={e.file}
-          onclick={() => void app.openExample(e)}
-        >
-          <Icon name="film" />
-          {e.title} <span class="muted">· {e.kind}</span>
-        </button>
-      {/each}
-    </div>
-  </section>
-
+  {#if !app.workspace}
+    <section class="examples" aria-labelledby="examples-title" id="examples">
+      <h3 id="examples-title">Try an example</h3>
+      <div class="example-list">
+        {#each EXAMPLES as e (e.file)}
+          <button
+            type="button"
+            class="btn"
+            data-example={e.file}
+            onclick={() => void app.openExample(e)}
+          >
+            <Icon name="film" />
+            {e.title} <span class="muted">· {e.kind}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
   <div class="tip">
     <h3>Working with an agent?</h3>
     {#if served}

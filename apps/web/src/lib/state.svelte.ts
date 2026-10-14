@@ -61,7 +61,14 @@ import {
   zipSource,
 } from './sources/local';
 import { exampleUrl, type BundledExample } from './examples';
-import { detectServer, servedBySbd } from './sources/server';
+import { detectServer, servedBySbd, serverHealth } from './sources/server';
+import {
+  projectBase,
+  workspaceApi,
+  type WorkspaceEntry,
+  type WorkspaceListing,
+  type WorkspaceSelection,
+} from './workspace';
 import {
   SaveConflictError,
   type MediaResolver,
@@ -136,6 +143,14 @@ function narrowScreen(): boolean {
 
 class AppState {
   source = $state.raw<ProjectSource | null>(null);
+  workspace = $state.raw<WorkspaceListing | null>(null);
+  workspaceOpen = $state(false);
+  workspaceBusy = $state(false);
+  workspaceError = $state<string | null>(null);
+  private mediaWork = new Set<Promise<unknown>>();
+  private switching = false;
+  private liveServer = false;
+  private switchLocked = $state(false);
   project = $state.raw<SbdProject | null>(null);
   /** State last loaded from / saved to the source. `project !== base` means unsaved changes. */
   base = $state.raw<SbdProject | null>(null);
@@ -215,7 +230,13 @@ class AppState {
   /** Changes not on disk yet, typed text that is not an edit yet included. */
   unsaved = $derived(this.dirty || this.buffered);
   saveMode = $derived<SaveMode>(this.source?.saveMode ?? 'none');
-  canEdit = $derived(!!this.project && !!this.source?.save && this.saveMode !== 'none');
+  canEdit = $derived(
+    !!this.project &&
+      !!this.source?.save &&
+      !this.source.readOnly &&
+      this.saveMode !== 'none' &&
+      !this.switchLocked,
+  );
   /**
    * Saving by itself: sbd serve, folders, and packed files opened through a file handle
    * (Chromium), which are written back in place. (`lastSaved`: the handle may arrive with the
@@ -245,11 +266,38 @@ class AppState {
     this.readHash();
     window.addEventListener('hashchange', () => this.readHash());
     window.addEventListener('beforeunload', (e) => {
-      if (this.dirty) e.preventDefault();
+      if (this.unsaved || this.saving || this.pending.size || this.mediaWork.size)
+        e.preventDefault();
     });
     // `?source=local` skips auto-connecting to `sbd serve` (open another file instead).
     const local = new URLSearchParams(location.search).get('source') === 'local';
-    const server = local || !servedBySbd() ? null : await detectServer();
+    // The generic shell marker permits probing; only live root health determines mode.
+    // Both legacy and workspace shells can be cached across listener restarts.
+    const health = servedBySbd() ? await serverHealth() : null;
+    this.liveServer = !!health;
+    if (health?.mode === 'workspace') {
+      try {
+        await this.refreshWorkspace();
+        if (!local) {
+          // The service worker can reuse a shell with another project's metadata.
+          // The scoped address, not the cached shell, identifies this tab's project.
+          const base = projectBase(
+            /^\/p\/[a-f0-9]{48}\/$/.test(location.pathname)
+              ? location.pathname
+              : this.workspace!.initial.url,
+          );
+          const server = await detectServer(base);
+          if (!server) throw new Error('Could not load the selected workspace storyboard.');
+          await this.open(server);
+          return;
+        }
+      } catch (e) {
+        this.error = (e as Error).message;
+        this.status = 'error';
+        return;
+      }
+    }
+    const server = local || !this.liveServer ? null : await detectServer('');
     if (server) {
       await this.open(server);
       return;
@@ -257,31 +305,147 @@ class AppState {
     await this.loadRecents();
   }
 
+  reportWarnings = (warnings: string[]): void => {
+    for (const message of new Set(warnings)) this.toast(message, { kind: 'error', sticky: true });
+  };
+
+  async refreshWorkspace(): Promise<void> {
+    this.workspace = await workspaceApi.list();
+    this.reportWarnings([...this.workspace.warnings, ...this.workspace.diagnostics]);
+    await this.loadRecents();
+  }
+
+  /** Drain editors and media before any operation that can retire or replace this tab's source. */
+  async finishBeforeSwitch(hold = false): Promise<boolean> {
+    if (this.switching) return false;
+    this.switching = true;
+    let finished = false;
+    try {
+      // Already admitted media edits finish before editors are frozen.
+      while (this.mediaWork.size) await Promise.allSettled(this.mediaWork);
+      this.flushEdits();
+      this.switchLocked = true;
+      clearTimeout(this.autosaveTimer);
+      // A queued save can outlive the first save promise. Drain the entire queue.
+      while (this.savePromise) await this.savePromise;
+      await this.save({ auto: true });
+      while (this.savePromise) await this.savePromise;
+      if (this.saveError || this.unsaved || this.pending.size || this.saving) {
+        if (!confirm('Changes were not saved. Discard them and switch storyboards?')) return false;
+        this.discardLocal();
+        this.pending.clear();
+        this.buffered = false;
+        this.saveError = null;
+      }
+      finished = true;
+      return true;
+    } finally {
+      if (!hold || !finished) {
+        this.switching = false;
+        this.switchLocked = false;
+      }
+    }
+  }
+
+  async workspaceAction(
+    action: () => Promise<WorkspaceSelection>,
+    message?: string,
+  ): Promise<boolean> {
+    if (this.workspaceBusy) return false;
+    this.workspaceBusy = true;
+    this.workspaceError = null;
+    try {
+      if (!(await this.finishBeforeSwitch(true))) return false;
+      const selected = await action();
+      this.reportWarnings(selected.warnings);
+      const base = projectBase(selected.url);
+      const source = await detectServer(base);
+      if (!source)
+        throw new Error(
+          'The project operation succeeded, but loading failed. Reopen it from Projects.',
+        );
+      await this.open(source, { prepared: true });
+      if (this.source !== source || this.status !== 'ready')
+        throw new Error(this.error ?? 'Could not load storyboard.');
+      await this.refreshWorkspace();
+      this.workspaceOpen = false;
+      if (message) this.toast(message, { kind: 'info' });
+      return true;
+    } catch (e) {
+      this.workspaceError = (e as Error).message;
+      this.toast(this.workspaceError, { kind: 'error', sticky: true });
+      return false;
+    } finally {
+      this.switching = false;
+      this.switchLocked = false;
+      this.workspaceBusy = false;
+    }
+  }
+
+  openWorkspace(entry: WorkspaceEntry): Promise<boolean> {
+    return this.workspaceAction(() => workspaceApi.open(this.client, entry.root, entry.name));
+  }
+
   /** This browser's recent list merged with the shared one of `sbd serve` (when served). */
   async loadRecents(): Promise<void> {
     const [local, shared] = await Promise.all([
       listRecent(),
-      servedBySbd() ? fetchSharedRecent() : [],
+      this.liveServer
+        ? fetchSharedRecent('', this.workspace ? this.reportWarnings : undefined)
+        : [],
     ]);
-    this.recents = mergeRecents(local, shared);
+    const browser = this.workspace ? local.filter((entry) => entry.kind !== 'server') : local;
+    this.recents = mergeRecents(browser, shared);
   }
 
-  async open(source: ProjectSource, opts: { remember?: boolean } = {}): Promise<void> {
-    this.close();
-    this.source = source;
-    this.status = 'loading';
-    this.error = null;
+  async open(
+    source: ProjectSource,
+    opts: { remember?: boolean; prepared?: boolean } = {},
+  ): Promise<void> {
+    if (!opts.prepared && !(await this.finishBeforeSwitch(true))) {
+      source.dispose();
+      return;
+    }
     try {
-      await this.reload();
+      if (!this.project) this.status = 'loading';
+      // Finish an old-source refresh before validating the replacement. A failed load must
+      // leave the previous model, source and address intact.
+      while (this.reloading) await this.reloading;
+      const loaded = await source.load();
+      if (source.workspace) {
+        const base = projectBase(`${source.url ?? ''}/`);
+        // Commit the validated route before any new source/selection/ready state is visible.
+        // IndexedDB history and thumbnail work are not part of this transition.
+        history.replaceState(null, '', `${base}/${location.hash}`);
+      }
+      this.close();
+      this.source = source;
+      this.project = loaded.project;
+      this.base = loaded.project;
+      this.media = loaded.media;
+      this.files = new Set(loaded.files ?? []);
+      this.reanchor = loaded.reanchor ?? null;
+      this.issues = loaded.issues;
+      if (this.selectedShot && !loaded.project.shots[this.selectedShot]) this.selectedShot = null;
+      this.error = null;
+      this.revision++;
+      document.title = `${loaded.project.manifest.title} — Storyboard Viewer`;
       this.unwatch =
         source.watch?.((info) => {
           if (info.origin && info.origin === this.client) return; // our own save
           void this.reload();
         }) ?? null;
-      if (opts.remember !== false) await this.remember();
+      this.status = 'ready';
+      if (opts.remember !== false) void this.remember();
     } catch (e) {
-      this.status = 'error';
+      if (this.source !== source) source.dispose();
+      if (!this.project) this.status = 'error';
       this.error = (e as Error).message;
+    } finally {
+      if (!opts.prepared) {
+        this.switching = false;
+        this.switchLocked = false;
+      }
     }
   }
 
@@ -292,6 +456,7 @@ class AppState {
   private async remember(): Promise<void> {
     const src = this.source;
     const p = this.project;
+    const media = this.media;
     if (!src || !p) return;
     try {
       const entry: RecentEntry = {
@@ -303,7 +468,7 @@ class AppState {
         openedAt: Date.now(),
       };
       if (src.kind === 'server') {
-        const url = `${location.origin}${location.pathname}`;
+        const url = new URL(`${src.url ?? ''}/`, location.origin).href;
         entry.id = `server:${url}`;
         entry.url = url;
         const file = src.location.split(/[\\/]/).filter(Boolean).at(-1) ?? src.name;
@@ -327,22 +492,26 @@ class AppState {
         entry.blob = await src.packed();
       }
       await putRecent(entry);
-      void this.makeThumb(entry.id);
+      void this.makeThumb(entry.id, p, src, media);
     } catch {
       /* the recent list is a convenience */
     }
   }
 
   /** A small picture of the first shot that has one (for the recent list). */
-  private async makeThumb(id: string): Promise<void> {
-    const p = this.project;
+  private async makeThumb(
+    id: string,
+    p: SbdProject,
+    source: ProjectSource,
+    media: MediaResolver | null,
+  ): Promise<void> {
     if (!p || typeof document === 'undefined') return;
     for (const { shot } of orderedShots(p)) {
       const v = activeVariant(shot);
       const assetId = v?.type === 'image' ? v.asset : v?.preview;
       const asset = assetId ? p.assets.assets.find((a) => a.id === assetId) : undefined;
       if (!asset || asset.kind !== 'image') continue;
-      const url = this.mediaUrl(asset.src);
+      const url = media?.url(asset.src);
       if (!url) continue;
       try {
         const img = new Image();
@@ -360,7 +529,13 @@ class AppState {
         const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/webp', 0.7));
         if (blob) {
           await putThumb(id, blob);
-          if (this.source?.kind === 'server') await putSharedThumb(this.client, blob);
+          if (source.kind === 'server' && this.source === source)
+            await putSharedThumb(
+              this.client,
+              blob,
+              source.url ?? '',
+              source.workspace ? this.reportWarnings : undefined,
+            );
         }
       } catch {
         /* no thumbnail */
@@ -371,6 +546,23 @@ class AppState {
 
   /** Opens a storyboard from the recent list. */
   async reopenRecent(entry: RecentEntry): Promise<void> {
+    if (this.workspace && entry.path) {
+      const known = [...this.workspace.examples, ...this.workspace.projects].find(
+        (e) => e.path === entry.path,
+      );
+      if (known) {
+        await this.openWorkspace(known);
+        return;
+      }
+      if (entry.kind === 'served' || entry.kind === 'server') {
+        this.toast(
+          'This storyboard is no longer in the workspace. Refresh Projects and choose it again.',
+          { kind: 'error' },
+        );
+        return;
+      }
+    }
+    if (!(await this.finishBeforeSwitch())) return;
     if (entry.kind === 'served' && entry.path) {
       // a viewer for it: already running, or started by this server on the next free port
       try {
@@ -437,7 +629,12 @@ class AppState {
   async forgetRecent(id: string): Promise<void> {
     const entry = this.recents.find((r) => r.id === id);
     if (entry?.kind === 'served' && entry.path) {
-      await forgetShared(this.client, entry.path);
+      await forgetShared(
+        this.client,
+        entry.path,
+        '',
+        this.workspace ? this.reportWarnings : undefined,
+      );
       // this browser's entries for the same storyboard (other ports) go too
       for (const r of await listRecent()) if (r.path === entry.path) await removeRecent(r.id);
     } else await removeRecent(id);
@@ -446,7 +643,13 @@ class AppState {
 
   async clearRecents(): Promise<void> {
     await clearRecent();
-    if (servedBySbd()) await forgetShared(this.client); // the shared list of `sbd serve`
+    if (this.liveServer)
+      await forgetShared(
+        this.client,
+        undefined,
+        '',
+        this.workspace ? this.reportWarnings : undefined,
+      ); // shared history
     this.recents = [];
   }
 
@@ -558,6 +761,9 @@ class AppState {
   }
 
   close(): void {
+    clearTimeout(this.autosaveTimer);
+    clearTimeout(this.validateTimer);
+    this.buffered = false;
     this.unwatch?.();
     this.unwatch = null;
     this.source?.dispose();
@@ -727,6 +933,7 @@ class AppState {
   }
 
   undo(): void {
+    if (!this.canEdit) return;
     this.flushEdits();
     if (!this.project) return;
     const e = this.history.undo(this.project);
@@ -738,6 +945,7 @@ class AppState {
   }
 
   redo(): void {
+    if (!this.canEdit) return;
     this.flushEdits();
     if (!this.project) return;
     const e = this.history.redo(this.project);
@@ -936,6 +1144,10 @@ class AppState {
   /** Read-only source (packed .sbd served by `sbd serve`): continue on an in-browser copy. */
   async editCopy(): Promise<void> {
     const src = this.source;
+    if (src?.workspace) {
+      this.workspaceOpen = true;
+      return;
+    }
     if (!src?.packed) return;
     const blob = await src.packed();
     await this.open(zipSource(blob, src.name));
@@ -998,12 +1210,26 @@ class AppState {
    * in memory and written on save (folder, packed file). Does not add it to the project.
    */
   async prepareFile(file: File): Promise<AssetInput> {
+    if (this.switching || !this.canEdit)
+      throw new Error('This storyboard is read-only or switching.');
+    const work = this.prepareFileNow(file);
+    this.mediaWork.add(work);
+    try {
+      return await work;
+    } finally {
+      this.mediaWork.delete(work);
+    }
+  }
+
+  private async prepareFileNow(file: File): Promise<AssetInput> {
     const src = this.source;
     if (!src) throw new Error('No storyboard open');
     const kind = guessKind(file.name) ?? (file.type ? guessKind(file.type) : undefined);
     if (!kind) throw new Error(`${file.name}: unsupported file type`);
     if (src.uploadMedia) {
       const asset = await src.uploadMedia(file, this.client);
+      if (this.source !== src)
+        throw new Error('The storyboard changed during upload. Reopen the original project.');
       const info = classifySrc(asset.src);
       if (info?.kind === 'embedded') {
         this.files.add(info.path);
@@ -1030,6 +1256,7 @@ class AppState {
     } catch {
       /* no WebCrypto (insecure context) */
     }
+    if (this.source !== src) throw new Error('The storyboard changed during import.');
     this.pending.set(path, file);
     this.setOverride(path, file);
     return asset;
@@ -1037,10 +1264,21 @@ class AppState {
 
   /** Imports files as embedded assets (one undo step). Returns the new asset IDs. */
   async importFiles(files: File[], extra: Partial<AssetInput> = {}): Promise<string[]> {
+    if (this.switching || !this.canEdit) return [];
+    const work = this.importFilesNow(files, extra);
+    this.mediaWork.add(work);
+    try {
+      return await work;
+    } finally {
+      this.mediaWork.delete(work);
+    }
+  }
+
+  private async importFilesNow(files: File[], extra: Partial<AssetInput>): Promise<string[]> {
     const inputs: AssetInput[] = [];
     for (const f of files) {
       try {
-        inputs.push({ ...(await this.prepareFile(f)), ...extra });
+        inputs.push({ ...(await this.prepareFileNow(f)), ...extra });
       } catch (e) {
         this.toast((e as Error).message, { kind: 'error' });
       }
@@ -1061,8 +1299,18 @@ class AppState {
 
   /** Server only: links a local file by path (relative to the folder containing the .sbd). */
   async linkLocalFile(path: string): Promise<AssetInput> {
-    if (!this.source?.linkPath) throw new Error('Linking local files needs `sbd serve`');
-    return this.source.linkPath(path, this.client);
+    const source = this.source;
+    if (this.switching || !this.canEdit || !source?.linkPath)
+      throw new Error('Linking local files needs a writable server project.');
+    const work = source.linkPath(path, this.client);
+    this.mediaWork.add(work);
+    try {
+      const asset = await work;
+      if (this.source !== source) throw new Error('The storyboard changed while linking media.');
+      return asset;
+    } finally {
+      this.mediaWork.delete(work);
+    }
   }
 
   // --- notices

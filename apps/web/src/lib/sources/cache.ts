@@ -245,13 +245,20 @@ export function mergeRecents(
 }
 
 /** The shared list from `sbd serve` on this origin; [] when not served by it. */
-export async function fetchSharedRecent(base = ''): Promise<SharedRecent[]> {
+type ReportWarnings = (warnings: string[]) => void;
+
+export async function fetchSharedRecent(
+  base = '',
+  report?: ReportWarnings,
+): Promise<SharedRecent[]> {
   try {
     const res = await fetch(`${base}/api/recent`, { cache: 'no-store' });
     if (!res.ok || !res.headers.get('content-type')?.includes('json')) return [];
-    const body = (await res.json()) as { recent?: SharedRecent[] };
+    const body = (await res.json()) as { recent?: SharedRecent[]; warnings?: string[] };
+    report?.(body.warnings ?? []);
     return Array.isArray(body.recent) ? body.recent : [];
-  } catch {
+  } catch (e) {
+    report?.([`Could not read shared history: ${(e as Error).message}`]);
     return [];
   }
 }
@@ -263,17 +270,30 @@ const write = (url: string, client: string, init: RequestInit = {}) =>
   });
 
 /** Removes one shared entry (by path) or, without a path, clears the shared list. */
-export async function forgetShared(client: string, path?: string, base = ''): Promise<void> {
+export async function forgetShared(
+  client: string,
+  path?: string,
+  base = '',
+  report?: ReportWarnings,
+): Promise<void> {
   try {
     const q = path ? `?path=${encodeURIComponent(path)}` : '';
-    await write(`${base}/api/recent${q}`, client, { method: 'DELETE' });
-  } catch {
-    /* ignore */
+    const res = await write(`${base}/api/recent${q}`, client, { method: 'DELETE' });
+    const body = (await res.json()) as { error?: string; warnings?: string[] };
+    if (!res.ok) throw new Error(body.error ?? `Server error ${res.status}`);
+    report?.(body.warnings ?? []);
+  } catch (e) {
+    report?.([`Could not update shared history: ${(e as Error).message}`]);
   }
 }
 
 /** Gives the server the small picture for the storyboard it serves. */
-export async function putSharedThumb(client: string, thumb: Blob, base = ''): Promise<void> {
+export async function putSharedThumb(
+  client: string,
+  thumb: Blob,
+  base = '',
+  report?: ReportWarnings,
+): Promise<void> {
   try {
     const thumbnail = await new Promise<string>((resolve, reject) => {
       const r = new FileReader();
@@ -282,17 +302,25 @@ export async function putSharedThumb(client: string, thumb: Blob, base = ''): Pr
       r.readAsDataURL(thumb);
     });
     if (thumbnail.length > 28_000) return;
-    await write(`${base}/api/recent/thumbnail`, client, {
+    const res = await write(`${base}/api/recent/thumbnail`, client, {
       method: 'PUT',
       body: JSON.stringify({ thumbnail }),
     });
-  } catch {
-    /* ignore */
+    const body = (await res.json()) as { error?: string; warnings?: string[] };
+    if (!res.ok) throw new Error(body.error ?? `Server error ${res.status}`);
+    report?.(body.warnings ?? []);
+  } catch (e) {
+    report?.([`Could not remember the thumbnail: ${(e as Error).message}`]);
   }
 }
 
 /** Asks for a viewer; the current storyboard reopens at the requesting origin's root. */
-export async function openShared(client: string, path: string, base = ''): Promise<string> {
+export async function openShared(
+  client: string,
+  path: string,
+  base = '',
+  report?: ReportWarnings,
+): Promise<string> {
   const res = await write(`${base}/api/open`, client, {
     method: 'POST',
     body: JSON.stringify({ path }),
@@ -301,8 +329,11 @@ export async function openShared(client: string, path: string, base = ''): Promi
     url?: string;
     current?: boolean;
     error?: string;
+    warnings?: string[];
   };
   if (!res.ok || !body.url) throw new Error(body.error ?? `Server error ${res.status}`);
+  report?.(body.warnings ?? []);
+  if (body.url.startsWith('/p/')) return body.url;
   // The server's advertised URL can use a container's hostname or internal port.
   if (body.current === true) {
     return base ? new URL('/', new URL(base, globalThis.location?.href)).href : '/';

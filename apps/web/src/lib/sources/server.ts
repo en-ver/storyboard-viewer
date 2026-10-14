@@ -24,7 +24,14 @@ interface ProjectResponse {
   media: Record<string, { size: number; mtime: number }>;
   reanchor: ReanchorSummary | null;
   revision: number;
-  source: { kind: 'folder' | 'packed'; name: string; path: string; readOnly: boolean };
+  source: {
+    kind: 'folder' | 'packed';
+    name: string;
+    path: string;
+    readOnly: boolean;
+    base?: string;
+    workspace?: ProjectSource['workspace'];
+  };
 }
 
 /**
@@ -37,23 +44,46 @@ export function servedBySbd(): boolean {
   return typeof document !== 'undefined' && !!document.querySelector('meta[name="sbd-serve"]');
 }
 
-/** Detects `sbd serve` (returns null when the app is hosted any other way). */
-export async function detectServer(base = ''): Promise<ProjectSource | null> {
+/** Root workspace health has a mode and initial selection; legacy/project health does not. */
+export interface ServerHealth {
+  app: 'sbd';
+  mode?: 'workspace';
+  initial?: { url: string };
+  name?: string;
+  path?: string;
+  readOnly?: boolean;
+}
+
+/** Read live metadata, never cached shell selection or mode markers. */
+export async function serverHealth(base = ''): Promise<ServerHealth | null> {
   try {
-    const res = await fetch(`${base}/api/health`, { cache: 'no-store' });
+    const res = await fetch(`${base.replace(/\/+$/, '')}/api/health`, { cache: 'no-store' });
     if (!res.ok || !res.headers.get('content-type')?.includes('json')) return null;
-    const health = (await res.json()) as {
-      app?: string;
-      name?: string;
-      path?: string;
-      kind?: string;
-    };
-    if (health.app !== 'sbd') return null;
+    const health = (await res.json()) as ServerHealth;
+    return health.app === 'sbd' ? health : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Detects a live server source at the supplied prefix, or the listener's root. */
+export async function detectServer(base = ''): Promise<ProjectSource | null> {
+  base = base.replace(/\/+$/, '');
+  try {
+    const health = await serverHealth(base);
+    if (!health) return null;
+    if (health.mode === 'workspace' && health.initial) {
+      base = health.initial.url.replace(/\/+$/, '');
+    }
+    const project = await fetch(`${base}/api/project`, { cache: 'no-store' });
+    if (!project.ok) throw new Error(`Could not load storyboard: ${project.status}`);
+    const data = (await project.json()) as ProjectResponse;
     return serverSource(
       base,
-      health.name ?? 'storyboard',
-      health.path ?? '',
-      false, // since 0.5.0 packed files are saved in place too
+      data.source.name,
+      data.source.path,
+      data.source.readOnly,
+      data.source.workspace,
     );
   } catch {
     return null;
@@ -85,7 +115,9 @@ export function serverSource(
   name: string,
   path: string,
   readOnly: boolean,
+  workspace?: ProjectSource['workspace'],
 ): ProjectSource {
+  base = base.replace(/\/+$/, '');
   const post = async (
     url: string,
     client: string,
@@ -104,6 +136,8 @@ export function serverSource(
     name,
     readOnly,
     location: path,
+    url: base,
+    workspace,
     saveMode: readOnly ? 'none' : 'server',
     async load(): Promise<LoadedProject> {
       const res = await fetch(`${base}/api/project`, { cache: 'no-store' });
@@ -112,6 +146,8 @@ export function serverSource(
         throw new Error(body.error ?? `Server error ${res.status}`);
       }
       const data = (await res.json()) as ProjectResponse;
+      if (data.source.readOnly !== readOnly)
+        throw new Error('Project permissions changed. Reopen the storyboard.');
       return {
         project: data.project,
         issues: data.issues,
@@ -140,48 +176,54 @@ export function serverSource(
       });
       return () => es.close();
     },
-    async save({ base: from, project, client }) {
-      const changes = diffProjectFiles(from, project);
-      if (!Object.keys(changes).length) return { project: from };
-      const files = serializeProject(from);
-      const versions = Object.fromEntries(
-        Object.keys(changes).map((k) => [k, fileVersion(files[k])]),
-      );
-      const res = await fetch(`${base}/api/project`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json', 'x-sbd-client': client },
-        body: JSON.stringify({ changes, base: versions }),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        project?: SbdProject;
-        error?: string;
-        conflicts?: string[];
-        issues?: Issue[];
-        readOnly?: boolean;
-      };
-      if (res.status === 409 && body.conflicts) throw new SaveConflictError(body.conflicts);
-      if (res.status === 422)
-        throw new SaveRejectedError(body.error ?? 'Invalid edit', body.issues);
-      if (!res.ok || !body.project) throw new Error(body.error ?? `Server error ${res.status}`);
-      return { project: body.project, message: `Saved to ${name}` };
-    },
-    uploadMedia: async (file, client) =>
-      (
-        await post(`${base}/api/media?name=${encodeURIComponent(file.name)}`, client, {
-          method: 'POST',
-          body: file,
-        })
-      ).asset,
-    linkPath: async (p, client) =>
-      (
-        await post(`${base}/api/link`, client, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ path: p }),
-        })
-      ).asset,
+    ...(readOnly
+      ? {}
+      : {
+          async save({ base: from, project, client }: import('./types').SaveRequest) {
+            const changes = diffProjectFiles(from, project);
+            if (!Object.keys(changes).length) return { project: from };
+            const files = serializeProject(from);
+            const versions = Object.fromEntries(
+              Object.keys(changes).map((k) => [k, fileVersion(files[k])]),
+            );
+            const res = await fetch(`${base}/api/project`, {
+              method: 'PUT',
+              headers: { 'content-type': 'application/json', 'x-sbd-client': client },
+              body: JSON.stringify({ changes, base: versions }),
+            });
+            const body = (await res.json().catch(() => ({}))) as {
+              project?: SbdProject;
+              error?: string;
+              conflicts?: string[];
+              issues?: Issue[];
+              readOnly?: boolean;
+            };
+            if (res.status === 409 && body.conflicts) throw new SaveConflictError(body.conflicts);
+            if (res.status === 422)
+              throw new SaveRejectedError(body.error ?? 'Invalid edit', body.issues);
+            if (!res.ok || !body.project)
+              throw new Error(body.error ?? `Server error ${res.status}`);
+            return { project: body.project, message: `Saved to ${name}` };
+          },
+          uploadMedia: async (file: File, client: string) =>
+            (
+              await post(`${base}/api/media?name=${encodeURIComponent(file.name)}`, client, {
+                method: 'POST',
+                body: file,
+              })
+            ).asset,
+          linkPath: async (p: string, client: string) =>
+            (
+              await post(`${base}/api/link`, client, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ path: p }),
+              })
+            ).asset,
+        }),
     async packed() {
       const res = await fetch(`${base}/api/download`);
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
       return res.blob();
     },
     dispose() {},

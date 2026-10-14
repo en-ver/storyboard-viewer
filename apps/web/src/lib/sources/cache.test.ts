@@ -1,5 +1,14 @@
+import { createProject } from '@storyboard-viewer/format';
 import { describe, expect, it, vi } from 'vitest';
-import { mergeRecents, openShared, sharedToEntry, timeAgo, type RecentEntry } from './cache';
+import { detectServer, serverHealth, serverSource } from './server';
+import {
+  fetchSharedRecent,
+  mergeRecents,
+  openShared,
+  sharedToEntry,
+  timeAgo,
+  type RecentEntry,
+} from './cache';
 
 const local = (id: string, openedAt: number, path?: string): RecentEntry => ({
   id,
@@ -87,6 +96,151 @@ describe('recent storyboards', () => {
     );
     try {
       expect(await openShared('browser', '/other.sbd')).toBe('http://localhost:4402/');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the scoped workspace URL and reports history warnings', async () => {
+    const warning = 'Shared history was not persisted/read.';
+    const report = vi.fn<(warnings: string[]) => void>();
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof globalThis.fetch>()
+        .mockImplementation(
+          async () =>
+            new Response(
+              JSON.stringify({ url: '/p/token/', current: true, recent: [], warnings: [warning] }),
+            ),
+        ),
+    );
+    try {
+      expect(await openShared('browser', '/projects/test.sbd', '', report)).toBe('/p/token/');
+      expect(await fetchSharedRecent('', report)).toEqual([]);
+      expect(report).toHaveBeenCalledWith([warning]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('loads a read-only example with scoped media and no mutation callbacks', async () => {
+    const base = `/p/${'a'.repeat(48)}`;
+    const source = serverSource(base, 'example.sbd', '/examples/example.sbd', true, {
+      root: 'examples',
+      label: 'Examples',
+    });
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          project: createProject({ title: 'Test data', preset: 'blank' }),
+          issues: [],
+          files: ['media/test.png'],
+          media: { 'media/test.png': { size: 1, mtime: 2 } },
+          source: { readOnly: true },
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const loaded = await source.load();
+      expect(fetch).toHaveBeenCalledWith(`${base}/api/project`, { cache: 'no-store' });
+      expect(loaded.media.url('media/test.png')).toBe(`${base}/api/files/media/test.png?v=2`);
+      expect(source.saveMode).toBe('none');
+      expect(source.save).toBeUndefined();
+      expect(source.uploadMedia).toBeUndefined();
+      expect(source.linkPath).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('reads live listener mode and an explicit scoped selection without shell metadata', async () => {
+    const base = `/p/${'c'.repeat(48)}`;
+    const project = createProject({ title: 'Test data', preset: 'blank' });
+    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async (url) => {
+      const path = String(url);
+      const body =
+        path === '/api/health'
+          ? { app: 'sbd', mode: 'workspace', initial: { url: `/p/${'d'.repeat(48)}/` } }
+          : path === `${base}/api/health`
+            ? { app: 'sbd', name: 'selected.sbd', readOnly: true }
+            : {
+                project,
+                source: {
+                  name: 'selected.sbd',
+                  path: '/examples/selected.sbd',
+                  readOnly: true,
+                  workspace: { root: 'examples', label: 'Examples' },
+                },
+              };
+      return new Response(JSON.stringify(body), {
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetch);
+    // A cached legacy shell cannot supply mode or the selected token.
+    vi.stubGlobal('document', { querySelector: () => null });
+    try {
+      expect((await serverHealth())?.mode).toBe('workspace');
+      const source = await detectServer(base);
+      expect(source).toMatchObject({
+        url: base,
+        name: 'selected.sbd',
+        readOnly: true,
+        workspace: { root: 'examples', label: 'Examples' },
+      });
+      expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+        '/api/health',
+        `${base}/api/health`,
+        `${base}/api/project`,
+      ]);
+      // Legacy health has no mode. Stale workspace/base markers must not change it.
+      fetch.mockReset();
+      fetch.mockImplementation(
+        async (url) =>
+          new Response(
+            JSON.stringify(
+              String(url) === '/api/health'
+                ? { app: 'sbd', name: 'legacy.sbd', readOnly: false }
+                : {
+                    project,
+                    source: { name: 'legacy.sbd', path: '/legacy.sbd', readOnly: false },
+                  },
+            ),
+            { headers: { 'content-type': 'application/json' } },
+          ),
+      );
+      vi.stubGlobal('document', { querySelector: () => ({ content: base }) });
+      expect((await serverHealth())?.mode).toBeUndefined();
+      expect(await detectServer()).toMatchObject({ url: '', name: 'legacy.sbd', readOnly: false });
+      expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+        '/api/health',
+        '/api/health',
+        '/api/project',
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('uploads into the selected writable project route', async () => {
+    const base = `/p/${'b'.repeat(48)}`;
+    const source = serverSource(base, 'test.sbd', '/projects/test.sbd', false);
+    const asset = { name: 'Test data', kind: 'image', src: 'media/test.png' };
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ asset })));
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const file = new File(['Test data'], 'test.png', { type: 'image/png' });
+      expect(await source.uploadMedia!(file, 'browser')).toEqual(asset);
+      expect(fetch).toHaveBeenCalledWith(`${base}/api/media?name=test.png`, {
+        method: 'POST',
+        body: file,
+        headers: { 'x-sbd-client': 'browser' },
+      });
+      expect(source.saveMode).toBe('server');
     } finally {
       vi.unstubAllGlobals();
     }
