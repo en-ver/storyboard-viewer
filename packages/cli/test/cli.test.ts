@@ -61,6 +61,15 @@ describe('sbd', () => {
     expect(c.out.join('\n')).toMatch(/Usage: sbd pack/);
   });
 
+  it('shows both legacy and opt-in workspace serve usage', async () => {
+    const c = capture();
+    expect(await run(['serve', '--help'], c.io)).toBe(0);
+    const help = c.out.join('\n');
+    expect(help).toContain('serve <path>');
+    for (const flag of ['--workspace', '--examples', '--default-project'])
+      expect(help).toContain(flag);
+  });
+
   it('creates and validates a new storyboard', async () => {
     const dir = join(tmp(), 'brand.sbd');
     const c = capture();

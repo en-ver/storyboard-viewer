@@ -21,8 +21,9 @@ export function registerViewer(projectPath: string, url: string): () => void {
   }
   return () => {
     try {
-      const cur = JSON.parse(readFileSync(file, 'utf8')) as { pid?: number };
-      if (cur.pid === process.pid) rmSync(file, { force: true });
+      const cur = JSON.parse(readFileSync(file, 'utf8')) as { pid?: number; url?: string };
+      // A retired scoped store must not unregister a newer lifetime from this process.
+      if (cur.pid === process.pid && cur.url === url) rmSync(file, { force: true });
     } catch {
       /* already gone */
     }

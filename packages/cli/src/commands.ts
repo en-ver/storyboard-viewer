@@ -26,6 +26,7 @@ import {
 } from './project-files.js';
 import { exportPdf } from './export-pdf.js';
 import { startServer } from './server.js';
+import { startWorkspaceServer } from './workspace-server.js';
 import { ProjectStore } from './store.js';
 import { VERSION } from './version.js';
 
@@ -347,31 +348,58 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: 'serve',
-    usage: 'sbd serve <path> [--port 4400] [--host 127.0.0.1] [--open]',
+    usage:
+      'sbd serve <path> [--port 4400] [--host 127.0.0.1] [--open]\n       sbd serve --workspace <projects> --examples <examples> [--default-project <basename>] [--port 4400] [--host 127.0.0.1] [--open]',
     summary: 'Serve the viewer + storyboard on localhost with live refresh',
     details:
       'Accepts an unpacked folder or a packed .sbd file (live refresh on every change; a packed file is saved in place, its previous version kept once as <file>.bak).\n' +
       'The storyboard is added to the recent list shared by every sbd serve\n' +
-      '(~/.config/storyboard-viewer/recent.json; SBD_CONFIG_DIR or XDG_CONFIG_HOME change the folder).',
+      '(~/.config/storyboard-viewer/recent.json; SBD_CONFIG_DIR or XDG_CONFIG_HOME change the folder).\n' +
+      'Workspace mode uses separate Projects and read-only Examples roots on one port. An explicit\n' +
+      'basename wins; otherwise the newest valid recent project opens, then Midnight Snack.\n' +
+      'A missing explicit basename is an error. New and Copy require an explicit user action.\n' +
+      'Pause cooperating external writers before rename; independent MCP sessions must reopen.',
     options: {
       port: { type: 'string', short: 'p' },
       host: { type: 'string' },
       open: { type: 'boolean' },
+      workspace: { type: 'string' },
+      examples: { type: 'string' },
+      'default-project': { type: 'string' },
     },
     async run({ positionals, values }, io) {
-      const store = ProjectStore.open(need(positionals, 0, '<path>'));
+      const workspace = values['workspace'] as string | undefined;
+      if (workspace !== undefined && (positionals.length || !values['examples']))
+        throw new UsageError('Workspace mode requires --examples and no positional path.');
+      if (
+        workspace === undefined &&
+        (values['examples'] !== undefined || values['default-project'] !== undefined)
+      )
+        throw new UsageError('--examples and --default-project require --workspace.');
+      const store =
+        workspace === undefined ? ProjectStore.open(need(positionals, 0, '<path>')) : undefined;
       const port = values['port'] ? Number(values['port']) : 4400;
       if (!Number.isInteger(port) || port < 0 || port > 65535)
         throw new UsageError('--port must be a number');
-      const srv = await startServer(store, {
+      const options = {
         port,
         host: (values['host'] as string | undefined) ?? '127.0.0.1',
         recent: true,
-        log: (m) => io.err(m),
-      });
+        log: (m: string) => io.err(m),
+      };
+      const srv = store
+        ? await startServer(store, options)
+        : await startWorkspaceServer({
+            ...options,
+            workspace: workspace!,
+            examples: values['examples'] as string,
+            ...(values['default-project'] !== undefined
+              ? { defaultProject: values['default-project'] as string }
+              : {}),
+          });
       io.out(`Storyboard Viewer: ${srv.url}`);
       for (const u of srv.networkUrls) io.out(`  on your network: ${u}`);
-      io.out(`Serving ${store.path}. Press Ctrl+C to stop.`);
+      io.out(`Serving ${store?.path ?? workspace}. Press Ctrl+C to stop.`);
       if (values['open']) openBrowser(srv.url);
       return untilSignal(() => srv.close());
     },

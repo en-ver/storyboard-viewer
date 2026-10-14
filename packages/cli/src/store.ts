@@ -11,7 +11,13 @@
 import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, statSync, watch, type Dirent, type FSWatcher } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { hasErrors, validateProject, type Issue, type SbdProject } from '@storyboard-viewer/format';
+import {
+  hasErrors,
+  serializeProject,
+  validateProject,
+  type Issue,
+  type SbdProject,
+} from '@storyboard-viewer/format';
 import {
   atomicWriteFile,
   backupPath,
@@ -26,6 +32,15 @@ import {
   type OpenedProject,
   type ProjectKind,
 } from '@storyboard-viewer/format/node';
+
+import type { ProjectBoundary } from './workspace-files.js';
+
+export interface StoreAccessPolicy {
+  /** Omitted for legacy writable folder and packed stores. */
+  readOnly?: boolean;
+  /** Workspace-only, pinned root/project identity and real-path checks. */
+  boundary?: ProjectBoundary;
+}
 
 export class EditRejectedError extends Error {
   override name = 'EditRejectedError';
@@ -80,29 +95,69 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
   /** Whether this process already kept a `.bak` of the packed file. */
   private backedUp = false;
 
-  private constructor(path: string, kind: ProjectKind) {
+  private retired = false;
+  private retiring = false;
+
+  private constructor(
+    path: string,
+    kind: ProjectKind,
+    readonly access: Readonly<StoreAccessPolicy>,
+  ) {
     super();
     this.path = path;
     this.kind = kind;
   }
 
-  static open(path: string): ProjectStore {
+  static open(path: string, access: StoreAccessPolicy = {}): ProjectStore {
     const abs = resolve(path);
+    if (access.boundary && access.boundary.path !== abs)
+      throw new Error('The workspace boundary must belong to this exact project path.');
+    access.boundary?.tree();
     if (!existsSync(abs)) throw new Error(`No storyboard at ${abs}`);
     const kind = projectKind(abs);
     if (kind === 'folder' && !existsSync(resolve(abs, 'manifest.json'))) {
       throw new Error(`${abs} is not a storyboard folder (manifest.json missing)`);
     }
-    return new ProjectStore(abs, kind);
+    return new ProjectStore(abs, kind, { ...access });
   }
 
   get name(): string {
     return basename(this.path);
   }
 
-  /** Always false since 0.5.0: packed files are saved in place too. */
+  /** Legacy stores remain writable; workspace examples and packed projects opt out. */
   get readOnly(): boolean {
-    return false;
+    return this.access.readOnly === true;
+  }
+
+  assertActive(): void {
+    if (this.retired)
+      throw Object.assign(new Error('Project route retired. Reopen the project.'), { status: 410 });
+    this.access.boundary?.tree();
+  }
+
+  assertWritable(): void {
+    this.assertActive();
+    if (this.retiring)
+      throw Object.assign(new Error('Project route retiring. Reopen the project.'), {
+        status: 410,
+      });
+    if (this.readOnly)
+      throw Object.assign(new Error('This project is read-only. Copy it to Projects to edit.'), {
+        status: 403,
+      });
+  }
+
+  filePath(rel: string, writing = false): string {
+    return this.access.boundary?.file(rel, writing) ?? safeJoin(this.path, rel);
+  }
+
+  /** Called after the HTTP admission gate drains complete saves and media requests. */
+  async retire(): Promise<void> {
+    this.retiring = true;
+    await this.queue;
+    this.retired = true;
+    this.stopWatching();
   }
 
   /** Where the previous version of a packed file is kept (null for folders). */
@@ -119,7 +174,8 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
 
   /** Package paths that exist (unique media names). */
   async has(rel: string): Promise<boolean> {
-    if (this.kind === 'folder') return existsSync(join(this.path, rel));
+    this.assertActive();
+    if (this.kind === 'folder') return existsSync(this.filePath(rel, true));
     return (await packedPaths(this.path)).has(rel);
   }
 
@@ -128,8 +184,17 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
    * into the packed file. `write` is called only for folders (the caller copies there).
    */
   async addFiles(files: Record<string, Uint8Array>): Promise<string[]> {
-    if (this.kind === 'folder') return Object.keys(files);
+    this.assertWritable();
+    if (this.kind === 'folder' && !this.access.boundary) return Object.keys(files);
     return this.serial(async () => {
+      if (this.kind === 'folder') {
+        this.access.boundary?.tree();
+        for (const [rel, bytes] of Object.entries(files))
+          await atomicWriteFile(this.filePath(rel, true), bytes);
+        const written = Object.keys(files);
+        this.markWritten(written);
+        return written;
+      }
       const opened = await this.load();
       const r = await writeProjectToPacked(this.path, opened.project, {
         add: files,
@@ -149,13 +214,29 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
 
   /** Loads the current state from disk (re-anchoring in memory if the script changed). */
   async load(): Promise<OpenedProject> {
-    const opened = await openProjectPath(this.path);
+    this.assertActive();
+    const opened = await openProjectPath(
+      this.path,
+      this.access.boundary
+        ? {
+            linkedExists: (src) => {
+              try {
+                const abs = this.linkedPath(src);
+                return abs ? existsSync(abs) : undefined;
+              } catch {
+                return false;
+              } // Never probe external legacy links in workspace mode.
+            },
+          }
+        : {},
+    );
     await opened.close();
     return opened;
   }
 
   linkedPath(src: string): string | null {
-    return resolveLinked(this.path, src);
+    const abs = resolveLinked(this.path, src);
+    return abs && this.access.boundary ? this.access.boundary.linked(abs) : abs;
   }
 
   /**
@@ -166,6 +247,7 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
     fn: (p: SbdProject, opened: OpenedProject) => T | Promise<T>,
     opts: EditOptions = {},
   ): Promise<T & { issues: Issue[]; written: string[] }> {
+    this.assertWritable();
     return this.serial(() => this.editNow(fn, opts));
   }
 
@@ -194,9 +276,12 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
       }
     }
     const added = Object.keys(opts.add ?? {});
-    if (this.kind === 'folder')
+    this.access.boundary?.tree();
+    if (this.kind === 'folder') {
+      for (const rel of Object.keys(serializeProject(result.project))) this.filePath(rel, true);
       for (const [rel, bytes] of Object.entries(opts.add ?? {}))
-        await atomicWriteFile(safeJoin(this.path, rel), bytes);
+        await atomicWriteFile(this.filePath(rel, true), bytes);
+    }
     const { written, deleted } =
       this.kind === 'folder'
         ? await writeProjectToFolder(this.path, result.project)
@@ -225,7 +310,14 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
 
   private stamp(rel: string): string | null {
     try {
-      const st = statSync(this.kind === 'packed' ? this.path : join(this.path, rel));
+      this.access.boundary?.assert();
+      const st = statSync(
+        this.kind === 'packed'
+          ? this.path
+          : this.access.boundary
+            ? this.filePath(rel)
+            : join(this.path, rel),
+      );
       return `${st.size}:${st.mtimeMs}:${st.ino}`;
     } catch {
       return 'deleted';
@@ -252,6 +344,7 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
    * picked up as they appear. `SBD_WATCH=native|per-directory` overrides the choice.
    */
   startWatching(debounceMs = 120, mode: WatchMode = defaultWatchMode()): void {
+    this.assertActive();
     if (this.watcher) return;
     const onEvent = (file: string | null) => {
       const rel = (file ?? '').split('\\').join('/');
