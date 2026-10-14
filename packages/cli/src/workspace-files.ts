@@ -93,10 +93,15 @@ export class ProjectBoundary {
     if (!this.folder && !st.isFile()) throw workspaceError('Unsupported project type.');
   }
 
-  assert(): void {
+  /** Check pinned roots first; only an explicit Open may replace a project lifetime. */
+  current(): boolean {
     this.root.check(this.path);
     const st = lstatSync(this.path);
-    if (st.dev !== this.dev || st.ino !== this.ino)
+    return st.dev === this.dev && st.ino === this.ino;
+  }
+
+  assert(): void {
+    if (!this.current())
       throw workspaceError('Project changed on disk. Reopen it before continuing.', 410);
   }
 

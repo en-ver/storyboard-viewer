@@ -2,9 +2,17 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { hasErrors, isPresetId, PRESET_IDS, type PresetId } from '@storyboard-viewer/format';
+import {
+  hasErrors,
+  isPresetId,
+  PRESET_IDS,
+  PROJECT_FILES,
+  serializeProject,
+  type PresetId,
+} from '@storyboard-viewer/format';
+import { atomicWriteFile, linkBase, resolveLinked } from '@storyboard-viewer/format/node';
 import { ProjectStore } from './store.js';
 import { createStoryboard } from './project-files.js';
 import { createProjectHttp, type ProjectHttp } from './project-http.js';
@@ -174,9 +182,22 @@ export class Workspace {
     };
   }
 
-  private async load(root: WorkspaceRootId, name: string): Promise<WorkspaceSelection> {
+  private async load(
+    root: WorkspaceRootId,
+    name: string,
+    refresh = false,
+  ): Promise<WorkspaceSelection> {
     const path = this.roots[root].child(name);
     let loaded = this.loaded.get(path);
+    const replacesInitial = loaded?.selection.token === this.initial?.token;
+    if (loaded && refresh && !loaded.store.access.boundary!.current()) {
+      // Open, not listing or an old content route, can retire a replaced project. Roots stay pinned.
+      loaded.retired = true;
+      this.loaded.delete(path);
+      await loaded.http.retire();
+      loaded.unregister();
+      loaded = undefined;
+    }
     if (loaded) {
       loaded.store.assertActive();
       const opened = await loaded.store.load();
@@ -185,7 +206,12 @@ export class Workspace {
     } else {
       const { store, entry } = await this.inspect(root, name);
       const token = randomBytes(24).toString('hex');
-      const selection: WorkspaceSelection = { ...entry, token, url: `/p/${token}/`, warnings: [] };
+      const selection: WorkspaceSelection = {
+        ...entry,
+        token,
+        url: `/p/${token}/`,
+        warnings: [],
+      };
       const http = createProjectHttp(store, {
         ...this.opts,
         webRoot: this.webRoot,
@@ -211,7 +237,9 @@ export class Workspace {
             ),
           );
     // Successful load precedes history writes. A warning is part of the open response, not success evidence.
-    return { ...loaded.selection, warnings: result.warnings };
+    const selected = { ...loaded.selection, warnings: result.warnings };
+    if (replacesInitial) this.initial = selected;
+    return selected;
   }
 
   async startup(): Promise<WorkspaceSelection> {
@@ -269,7 +297,7 @@ export class Workspace {
   }
 
   open(root: WorkspaceRootId, name: string): Promise<WorkspaceSelection> {
-    return this.serial(() => this.load(root, projectName(name)));
+    return this.serial(() => this.load(root, projectName(name), true));
   }
 
   listing(): Promise<WorkspaceListing> {
@@ -348,8 +376,14 @@ export class Workspace {
         }
       };
       await copy(store.path, dest);
-      await writeFile(join(dest, EXAMPLE_COPY_FILES.license), license, { flag: 'wx', mode: 0o644 });
-      await writeFile(join(dest, EXAMPLE_COPY_FILES.readme), readme, { flag: 'wx', mode: 0o644 });
+      await writeFile(join(dest, EXAMPLE_COPY_FILES.license), license, {
+        flag: 'wx',
+        mode: 0o644,
+      });
+      await writeFile(join(dest, EXAMPLE_COPY_FILES.readme), readme, {
+        flag: 'wx',
+        mode: 0o644,
+      });
       await writeFile(
         join(dest, EXAMPLE_COPY_FILES.source),
         `# Example source\n\nCopied from examples/${example} in Storyboard Viewer.\nSource revision: ${EXAMPLE_SOURCE_REVISION}.\nOriginal project bytes, IDs, title and assets are preserved.\nSee LICENSE and EXAMPLES-README.md for the original notice and publisher provenance.\n`,
@@ -380,11 +414,56 @@ export class Workspace {
       this.loaded.delete(old);
       // Stop admission synchronously, then drain all complete HTTP writes (including uploads),
       // the store edit queue and saves. This is not a cross-process lock.
-      await loaded.http.retire();
-      loaded.unregister();
+      let assetsText: string | undefined;
+      try {
+        await loaded.http.retire(async () => {
+          const opened = await loaded.store.load();
+          if (hasErrors(opened.issues))
+            throw workspaceError(`Invalid storyboard ${loaded.selection.name}.`);
+          let changed = false;
+          const rebase = (src: string): string => {
+            const abs = resolveLinked(old, src);
+            if (!abs) return src;
+            let own: string;
+            try {
+              own = loaded.store.access.boundary!.linked(abs);
+            } catch {
+              return src; // External references are never rewritten or probed.
+            }
+            changed = true;
+            const moved = join(dest, relative(old, own));
+            return `file:${relative(linkBase(dest), moved).split(sep).join('/')}`;
+          };
+          const assets = {
+            ...opened.project.assets,
+            assets: opened.project.assets.assets.map((asset) => ({
+              ...asset,
+              src: rebase(asset.src),
+              ...(asset.poster === undefined ? {} : { poster: rebase(asset.poster) }),
+              ...(asset.variants === undefined
+                ? {}
+                : {
+                    variants: asset.variants.map((variant) => ({
+                      ...variant,
+                      src: rebase(variant.src),
+                    })),
+                  }),
+            })),
+          };
+          if (changed)
+            assetsText = serializeProject({ ...opened.project, assets })[PROJECT_FILES.assets];
+        });
+      } finally {
+        loaded.unregister();
+      }
       loaded.store.access.boundary!.tree();
       this.roots.projects.check(dest, true);
       await rename(old, dest);
+      if (assetsText !== undefined) {
+        const boundary = new ProjectBoundary(this.roots.projects, dest);
+        boundary.tree();
+        await atomicWriteFile(boundary.file(PROJECT_FILES.assets, true), assetsText);
+      }
       const history = this.history(() => renameRecent(old, dest, { strict: true }));
       const selected = await this.load('projects', name);
       selected.warnings.push(...history.warnings);

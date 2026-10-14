@@ -42,7 +42,9 @@ export interface ProjectHttpOptions {
 
 export interface ProjectHttp {
   handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void>;
-  retire(): Promise<void>;
+  /** Static app resources do not depend on the project lifetime. */
+  shell(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void>;
+  retire(afterDrain?: () => Promise<void>): Promise<void>;
 }
 
 const TEXT_TYPES: Record<string, string> = {
@@ -622,15 +624,19 @@ export function createProjectHttp(store: ProjectStore, opts: ProjectHttpOptions)
         writes.delete(run);
       }
     },
-    async retire() {
+    shell: handleStatic,
+    async retire(afterDrain) {
       accepting = false;
       await Promise.allSettled(writes);
-      if (opts.base) await store.retire();
-      else store.stopWatching();
-      clearInterval(heartbeat);
-      store.off('change', onChange);
-      for (const c of clients) c.end();
-      clients.clear();
+      try {
+        if (opts.base) await store.retire(afterDrain);
+        else store.stopWatching();
+      } finally {
+        clearInterval(heartbeat);
+        store.off('change', onChange);
+        for (const c of clients) c.end();
+        clients.clear();
+      }
     },
   };
 }

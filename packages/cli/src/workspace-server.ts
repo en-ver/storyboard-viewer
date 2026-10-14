@@ -180,7 +180,7 @@ export async function startWorkspaceServer(opts: WorkspaceOptions): Promise<Runn
         sendError(res, 405, 'Method not allowed');
         return;
       }
-      await workspace.shell().handle(req, res, url);
+      await workspace.shell().shell(req, res, url);
     }, opts);
     workspace.attachOrigin(srv.url);
     return {

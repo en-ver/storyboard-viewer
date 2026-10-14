@@ -132,7 +132,9 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
 
   assertActive(): void {
     if (this.retired)
-      throw Object.assign(new Error('Project route retired. Reopen the project.'), { status: 410 });
+      throw Object.assign(new Error('Project route retired. Reopen the project.'), {
+        status: 410,
+      });
     this.access.boundary?.tree();
   }
 
@@ -153,11 +155,15 @@ export class ProjectStore extends EventEmitter<{ change: [ChangeEvent] }> {
   }
 
   /** Called after the HTTP admission gate drains complete saves and media requests. */
-  async retire(): Promise<void> {
+  async retire(afterDrain?: () => Promise<void>): Promise<void> {
     this.retiring = true;
     await this.queue;
-    this.retired = true;
-    this.stopWatching();
+    try {
+      await afterDrain?.();
+    } finally {
+      this.retired = true;
+      this.stopWatching();
+    }
   }
 
   /** Where the previous version of a packed file is kept (null for folders). */
