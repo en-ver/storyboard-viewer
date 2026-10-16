@@ -14,3 +14,4 @@ playwright-report/
 packages/cli/web/
 e2e/.tmp/
 .wrangler/
+/docker-compose.yml
