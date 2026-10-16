@@ -65,7 +65,6 @@ In Windows PowerShell, use:
 New-Item -ItemType Directory -Force ./storyboard
 ```
 
-Compose refuses a missing bind directory instead of silently creating it as root.
 Relative paths resolve from the Compose project directory.
 On Windows, use forward slashes, such as `C:/Storyboards`, in `.env`.
 Quote values that contain spaces, for example `STORYBOARD_DIR="C:/My Storyboards"`.
