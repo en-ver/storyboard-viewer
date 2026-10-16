@@ -62,6 +62,12 @@ cloud: your storyboards are ordinary files on your computer.
 - To let your AI agent edit storyboards while you watch, set it up on your computer (next
   section).
 
+## Run locally with Docker
+
+Use the [Docker and MCP deployment guide](docs/DOCKER_MCP_DEPLOYMENT.md) for a persistent,
+localhost-only viewer with optional agent access. Docker builds the app inside the image.
+You do not need Node.js or pnpm on the host. This is an alternative to the native setup below.
+
 ## Use it with your AI agent
 
 You need [Claude Code](https://claude.com/claude-code) or

@@ -14,4 +14,4 @@ ENV HOME=/home/node \
     NO_UPDATE_CHECK=1
 USER node
 
-CMD ["serve", "--single", "/app/apps/web/dist", "--listen", "tcp://127.0.0.1:4400", "--no-clipboard", "--no-port-switching"]
+CMD ["serve", "--single", "/app/apps/web/dist", "--listen", "tcp://0.0.0.0:4400", "--no-clipboard", "--no-port-switching"]

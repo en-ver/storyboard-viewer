@@ -1,0 +1,25 @@
+name: storyboard-viewer
+
+services:
+  storyboard-viewer:
+    image: ${STORYBOARD_IMAGE:-storyboard-viewer:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${STORYBOARD_CONTAINER_NAME:-storyboard-viewer}
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${STORYBOARD_PORT:-4400}:4400'
+    volumes:
+      - type: bind
+        source: ${STORYBOARD_DIR:-./storyboard}
+        target: /projects
+        bind:
+          create_host_path: false
+      - type: volume
+        source: config
+        target: /config
+
+volumes:
+  config:
+    name: ${STORYBOARD_CONFIG_VOLUME:-storyboard-viewer_config}
