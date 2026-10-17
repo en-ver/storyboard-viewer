@@ -9,7 +9,7 @@ All notable changes are listed here. The format follows
 ### Added
 
 - Portable Docker Compose deployment with a localhost-only viewer, optional environment
-  configuration, persistent storage, and a guide for browser and MCP access.
+  configuration, persistent storage, and a guide for browser and MCP access in `docker/`.
 
 ## [0.5.3] — 2026-10-11
 

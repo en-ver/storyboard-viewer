@@ -1,6 +1,6 @@
 # Docker and MCP deployment
 
-Run a persistent viewer on your own computer with the root `Dockerfile` and `docker-compose.yml`.
+Run a persistent viewer on your own computer with `docker/Dockerfile` and `docker/docker-compose.yml`.
 The container serves the built browser app from `/app/apps/web/dist`.
 It starts without a storyboard, an AI agent, or an MCP connection.
 You do not need Node.js, pnpm, or a build on the host.
@@ -16,13 +16,19 @@ The persistent viewer is a static frontend, not the native CLI's HTTP API server
 
 Use Docker Desktop on macOS, Windows, or supported Linux systems.
 On Linux, Docker Engine with the Compose plugin is another option.
-Use a current Docker release and modern Compose v2 or newer that supports `bind.create_host_path`.
+Use a current Docker release and Compose v2 or newer.
 The commands below use `docker compose`, not the legacy `docker-compose` command.
 Your account must have permission to use Docker.
 Docker access grants substantial control over the host.
 
-Keep a local checkout of this repository, including the root Dockerfile and Compose file.
-Run the deployment commands from that checkout's root directory.
+Keep a local checkout of this repository, including its `docker/` folder.
+From the repository root, enter that folder before running the commands below:
+
+```sh
+cd docker
+```
+
+All following deployment commands run from `docker/` unless stated otherwise.
 The initial build needs internet access for the base image and dependencies.
 Use Chrome or Edge for browser access to unpacked storyboard folders.
 Do not rely on an embedded browser that lacks the required file access features.
@@ -52,20 +58,21 @@ Copy-Item .env.example .env
 
 Edit `.env` and uncomment the values you need.
 The example explains every variable and its default.
-For `STORYBOARD_DIR`, choose your directory or create the default `./storyboard` before startup.
+For `STORYBOARD_DIR`, choose your directory or create the default `../storyboard` before startup.
 For a new default directory on macOS or Linux, use:
 
 ```sh
-mkdir -p ./storyboard
+mkdir -p ../storyboard
 ```
 
 In Windows PowerShell, use:
 
 ```powershell
-New-Item -ItemType Directory -Force ./storyboard
+New-Item -ItemType Directory -Force ../storyboard
 ```
 
-Relative paths resolve from the Compose project directory.
+Relative paths resolve from the Compose project directory, `docker/`.
+The default `../storyboard` is the repository's `storyboard/` directory.
 On Windows, use forward slashes, such as `C:/Storyboards`, in `.env`.
 Quote values that contain spaces, for example `STORYBOARD_DIR="C:/My Storyboards"`.
 With Docker Desktop, allow Docker to share the selected drive or directory when required.
@@ -88,12 +95,12 @@ Replacing a file requires write permission on its parent directory.
 
 If your host account uses another UID, arrange a shared group or an access control list (ACL).
 An ACL grants access to specific users without changing file ownership.
-For a new, empty `./storyboard` directory, the following example grants access to both users.
+For a new, empty `../storyboard` directory, the following example grants access to both users.
 Run it as the directory owner, with your system's `setfacl` utility available:
 
 ```sh
-setfacl -m "u:$(id -u):rwx,u:1000:rwx,m::rwx" ./storyboard
-setfacl -d -m "u:$(id -u):rwx,u:1000:rwx,m::rwx" ./storyboard
+setfacl -m "u:$(id -u):rwx,u:1000:rwx,m::rwx" ../storyboard
+setfacl -d -m "u:$(id -u):rwx,u:1000:rwx,m::rwx" ../storyboard
 ```
 
 The second command sets default ACLs for new files and subdirectories.
@@ -112,7 +119,7 @@ The `/config` volume starts with ownership for UID 1000, so another UID needs se
 
 ## Build and start
 
-Build the image from the repository root:
+Build the image from `docker/`:
 
 ```sh
 docker compose build
@@ -122,6 +129,12 @@ Start the persistent viewer:
 
 ```sh
 docker compose up -d --build
+```
+
+Alternatively, from the repository root, use the following command after creating `docker/.env` from the example:
+
+```sh
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --build
 ```
 
 Use `up -d --build` for the initial deployment, even if an older local image already exists.
